@@ -13,6 +13,7 @@ struct Category {
         "Personal Care",
         "Travel",
         "Investment",
+        "Gift",
         "Other"
     ]
     
@@ -36,6 +37,7 @@ struct Category {
         case "Salary": return .green
         case "Freelance": return .teal
         case "Investment": return .green
+        case "Gift": return .yellow
         default: return .gray
         }
     }
@@ -50,6 +52,7 @@ struct Category {
         case "Healthcare": return "cross.case.fill"
         case "Salary": return "banknote.fill"
         case "Investment": return "chart.line.uptrend.xyaxis"
+        case "Gift": return "gift.fill"
         default: return "tag.fill"
         }
     }

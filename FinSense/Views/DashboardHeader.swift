@@ -6,6 +6,10 @@ struct DashboardHeader: View {
     let spent: Double
     let monthlyIncome: Double
     let insight: Insight?
+    @Binding var showThisMonth: Bool
+    let hasTransactions: Bool
+
+    @Binding var showBalanceEdit: Bool
     
     var potentialSavings: Double {
         monthlyIncome - spent
@@ -18,56 +22,122 @@ struct DashboardHeader: View {
                 .resizable()
                 .aspectRatio(contentMode: .fill)
                 .frame(maxWidth: .infinity)
-                .frame(height: 340)
+                .frame(height: 390)
                 .clipped()
                 .overlay(
-                    LinearGradient(colors: [.black.opacity(0.4), .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
+                    LinearGradient(colors: [.black.opacity(0.3), .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
                 )
                 .edgesIgnoringSafeArea(.top)
             
-            VStack(alignment: .leading, spacing: 16) {
-                // Title
-                Text("Finlytics")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                    .padding(.top, 10)
+            VStack(alignment: .leading, spacing: 14) {
+                // Enhanced Title with gradient
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Finlytics")
+                            .font(.system(size: 34, weight: .black, design: .rounded))
+                            .foregroundStyle(
+                                LinearGradient(colors: [.white, .cyan.opacity(0.9)], startPoint: .leading, endPoint: .trailing)
+                            )
+                            .shadow(color: .cyan.opacity(0.5), radius: 8, x: 0, y: 2)
+                        
+                        Text("Your money, visualized")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    Spacer()
+                }
+                .padding(.top, 8)
                 
-                // Insight Section (Top, beneath title)
+                // Insight Section
                 HStack(spacing: 12) {
                     Image(systemName: "sparkles")
                         .font(.title3)
                         .foregroundStyle(.yellow)
-                    
+    
                     if let insight = insight {
                         Text(insight.message)
                             .font(.subheadline)
                             .foregroundStyle(.white)
-                            .lineLimit(4)
+                            .lineLimit(3)
+                    } else if hasTransactions {
+                         Text("Analyzing your financial health...")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.8))
+                            .lineLimit(2)
                     } else {
-                        Text("Record transactions to unlock AI-powered insights! ✨")
+                        Text("Record transactions to unlock AI-powered insights!")
                             .font(.subheadline)
                             .foregroundStyle(.white.opacity(0.8))
                             .lineLimit(2)
                     }
                 }
-                .padding(14)
+                .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.ultraThinMaterial)
-                .cornerRadius(14)
+                .cornerRadius(12)
                 
                 // 2x2 Grid of Stat Cards
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    StatCard(title: "Net Balance", value: balance, icon: "building.columns.fill", color: .cyan)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    // Balance card is tappable
+                    StatCard(title: "Balance", value: balance, icon: "building.columns.fill", color: .cyan)
+                        .tutorialTarget(.editBalance)
+                        .onTapGesture { showBalanceEdit = true }
+                        .overlay(
+                            HStack {
+                                Spacer()
+                                VStack {
+                                    Image(systemName: "pencil.circle.fill")
+                                        .font(.caption2)
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .padding(6)
+                                    Spacer()
+                                }
+                            }
+                        )
                     StatCard(title: "Spent", value: -spent, icon: "creditcard.fill", color: .red, isNegative: true)
+                        .tutorialTarget(.expenseOverview)
                     StatCard(title: "Inflow", value: monthlyIncome, icon: "arrow.down.circle.fill", color: .green)
-                    StatCard(title: "Saved", value: potentialSavings, icon: "leaf.fill", color: .teal)
+                    StatCard(title: "Saved", value: max(0, potentialSavings), icon: "leaf.fill", color: .teal)
+                }
+                
+                // This Month / Wrapped Button
+                Button {
+                    showThisMonth = true
+                } label: {
+                    HStack {
+                        Image(systemName: isWrappedTime ? "gift.fill" : "calendar")
+                        Text(isWrappedTime ? "\(currentMonthName) Wrapped 🎉" : "More on your Month")
+                            .fontWeight(.medium)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.white)
+                    .padding(12)
+                    .background(isWrappedTime ? Color.purple.opacity(0.5) : Color.white.opacity(0.15))
+                    .cornerRadius(12)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 16)
         }
         .cornerRadius(24)
         .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 6)
+    }
+    
+    // Check if last 2 days of month
+    var isWrappedTime: Bool {
+        let calendar = Calendar.current
+        let now = Date()
+        let dayOfMonth = calendar.component(.day, from: now)
+        let daysInMonth = calendar.range(of: .day, in: .month, for: now)?.count ?? 30
+        return dayOfMonth >= daysInMonth - 1
+    }
+    
+    var currentMonthName: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM"
+        return formatter.string(from: Date())
     }
 }
 

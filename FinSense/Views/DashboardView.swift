@@ -5,13 +5,13 @@ import Charts
 struct DashboardView: View {
     @Query private var transactions: [Transaction]
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var tutorialManager: TutorialManager
     @AppStorage("monthlySalary") private var monthlySalary: Double = 0.0
     @State private var apiKey: String = ""
-    @Query(sort: \Insight.generatedDate, order: .reverse) private var insights: [Insight]
+    @State private var showThisMonth = false
+    @State private var dailyInsight: Insight? = nil  // Direct state instead of @Query
     
-    var dailyInsight: Insight? { insights.first }
-    
-    // Compute current month's transactions
+    // Current month's transactions
     var currentMonthTransactions: [Transaction] {
         let calendar = Calendar.current
         let now = Date()
@@ -19,48 +19,120 @@ struct DashboardView: View {
         return transactions.filter { $0.date >= startOfMonth }
     }
     
-    // Summary Calculations
-    var netBalance: Double {
-        let income = transactions.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
-        let expense = transactions.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
-        return income - expense
+    // Lifetime totals
+    var lifetimeIncome: Double {
+        transactions.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
     }
     
+    // Lifetime expense includes investments (affects balance)
+    var lifetimeExpense: Double {
+        transactions.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
+    }
+    
+    var netBalance: Double {
+        lifetimeIncome - lifetimeExpense
+    }
+    
+    // Monthly stats
     var monthlyIncome: Double {
         currentMonthTransactions.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
     }
     
     var monthlyExpense: Double {
-        currentMonthTransactions.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
+        currentMonthTransactions.filter { MonthlyStats.isSpending($0) }.reduce(0) { $0 + $1.amount }
+    }
+    
+    @State private var showBalanceEdit = false
+    @AppStorage("startingBalance") private var startingBalance: Double = 0.0
+    @State private var balanceInput: String = ""
+    
+    // Transaction-based change (income - expenses from all transactions)
+    var transactionChange: Double {
+        lifetimeIncome - lifetimeExpense
+    }
+    
+    // Displayed balance = Starting balance + all transaction changes
+    var displayedBalance: Double {
+        startingBalance + transactionChange
     }
     
     var body: some View {
         NavigationView {
             ScrollView {
-                VStack(spacing: 20) {
-                    // Unified Header with Insight + 4 Stat Cards
-                    DashboardHeader(balance: netBalance, spent: monthlyExpense, monthlyIncome: monthlyIncome, insight: dailyInsight)
+                VStack(spacing: 24) {
+                    // Header with stats + This Month button
+                    // Header with stats + This Month button
+                    DashboardHeader(balance: displayedBalance, spent: monthlyExpense, monthlyIncome: monthlyIncome, insight: dailyInsight, showThisMonth: $showThisMonth, hasTransactions: !transactions.isEmpty, showBalanceEdit: $showBalanceEdit)
                     
+                    // Spending Trends (months)
                     SpendingTrendsView(transactions: transactions)
+                        .tutorialTarget(.spendingTrends)
                     
-                    MonthlyFlowChartView(monthlyIncome: monthlyIncome, monthlyExpense: monthlyExpense)
+                    // Lifetime Expenses
+                    LifetimeExpensesView(transactions: transactions)
                     
-                    CategoryBreakdownView(transactions: currentMonthTransactions, monthlyExpense: monthlyExpense)
-                    
+                    // Recent Transactions
                     RecentTransactionsView(transactions: transactions)
                 }
             }
             .navigationTitle("")
             .navigationBarHidden(true)
             .onAppear {
-                // Read API key from Keychain
                 apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
+                balanceInput = startingBalance > 0 ? String(format: "%.0f", startingBalance) : ""
             }
             .task {
-                // Ensure key is loaded before fetching
+                // Only fetch once when view appears - InsightEngine handles cooldown internally
                 let key = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
-                if !transactions.isEmpty && !key.isEmpty {
-                    _ = await InsightEngine.shared.fetchTodaysInsight(context: modelContext, transactions: transactions, apiKey: key)
+                let insight = await InsightEngine.shared.fetchTodaysInsight(context: modelContext, transactions: transactions, apiKey: key)
+                dailyInsight = insight
+                print("DEBUG DASHBOARD: Set dailyInsight to: \(insight?.title ?? "nil")")
+            }
+            .sheet(isPresented: $showThisMonth) {
+                ThisMonthSheet(transactions: transactions)
+            }
+            .sheet(isPresented: $showBalanceEdit) {
+                NavigationView {
+                    Form {
+                        Section("Set Your Balance") {
+                            Text("Enter your current actual balance. Future transactions will be added/subtracted from this.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            HStack {
+                                Text("₹")
+                                    .foregroundColor(.secondary)
+                                TextField("Enter amount", text: $balanceInput)
+                                    #if os(iOS)
+                                    .keyboardType(.numberPad)
+                                    #endif
+                            }
+                        }
+                        
+                        Section("How it works") {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Your balance = Starting balance + Income − Expenses")
+                                    .font(.caption)
+                                Text("Transaction change so far: \(transactionChange >= 0 ? "+" : "")\(transactionChange, format: .currency(code: "INR"))")
+                                    .font(.caption)
+                                    .foregroundColor(transactionChange >= 0 ? .green : .red)
+                            }
+                        }
+                    }
+                    .navigationTitle("Edit Balance")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showBalanceEdit = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Save") {
+                                startingBalance = Double(balanceInput) ?? 0
+                                showBalanceEdit = false
+                                tutorialManager.completeStep(.editBalance)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -74,95 +146,83 @@ struct SpendingTrendsView: View {
     
     struct TrendData: Identifiable {
         let id = UUID()
-        let month: Date
+        let month: String
         let amount: Double
     }
     
     var spendingTrends: [TrendData] {
         let calendar = Calendar.current
         let now = Date()
-        guard let sixMonthsAgo = calendar.date(byAdding: .month, value: -6, to: now) else { return [] }
-        
-        // Filter last 6 months expenses
-        let recentExpenses = transactions.filter { $0.date >= sixMonthsAgo && $0.type == .expense }
-        
-        // Group by Month
-        let grouped = Dictionary(grouping: recentExpenses) { tx in
-            calendar.date(from: calendar.dateComponents([.year, .month], from: tx.date)) ?? tx.date
-        }
-        
-        // Map to sorted array
         var result: [TrendData] = []
-        for i in 0..<6 {
-            if let date = calendar.date(byAdding: .month, value: -i, to: now) {
-                 let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: date)) ?? date
-                 let amount = grouped[startOfMonth]?.reduce(0) { $0 + $1.amount } ?? 0
-                 result.append(TrendData(month: startOfMonth, amount: amount))
-            }
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM"
+        
+        // Last 6 months
+        for i in (0..<6).reversed() {
+            guard let monthDate = calendar.date(byAdding: .month, value: -i, to: now) else { continue }
+            let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: monthDate)) ?? monthDate
+            let endOfMonth = calendar.date(byAdding: .month, value: 1, to: startOfMonth) ?? monthDate
+            
+            let expenses = transactions.filter { $0.date >= startOfMonth && $0.date < endOfMonth && MonthlyStats.isSpending($0) }
+            let total = expenses.reduce(0) { $0 + $1.amount }
+            
+            result.append(TrendData(month: formatter.string(from: monthDate), amount: total))
         }
-        return result.sorted { $0.month < $1.month }
+        return result
     }
     
     var body: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Spending Trends")
                 .font(.headline)
                 .padding(.horizontal)
             
-            Chart {
-                ForEach(spendingTrends) { trend in
-                    AreaMark(
-                        x: .value("Month", trend.month, unit: .month),
-                        y: .value("Amount", trend.amount)
-                    )
-                    .foregroundStyle(LinearGradient(colors: [.indigo, .indigo.opacity(0.1)], startPoint: .top, endPoint: .bottom))
-                    .interpolationMethod(.catmullRom)
-                    
-                    LineMark(
-                        x: .value("Month", trend.month, unit: .month),
-                        y: .value("Amount", trend.amount)
-                    )
-                    .foregroundStyle(.indigo)
-                    .interpolationMethod(.catmullRom)
+            if spendingTrends.allSatisfy({ $0.amount == 0 }) {
+                Text("No spending data yet")
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 150)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(16)
+                    .padding(.horizontal)
+            } else {
+                Chart {
+                    ForEach(spendingTrends) { trend in
+                        AreaMark(
+                            x: .value("Month", trend.month),
+                            y: .value("Amount", trend.amount)
+                        )
+                        .foregroundStyle(LinearGradient(colors: [.indigo.opacity(0.6), .indigo.opacity(0.1)], startPoint: .top, endPoint: .bottom))
+                        .interpolationMethod(.catmullRom)
+                        
+                        LineMark(
+                            x: .value("Month", trend.month),
+                            y: .value("Amount", trend.amount)
+                        )
+                        .foregroundStyle(.indigo)
+                        .interpolationMethod(.catmullRom)
+                        .lineStyle(StrokeStyle(lineWidth: 2))
+                        
+                        PointMark(
+                            x: .value("Month", trend.month),
+                            y: .value("Amount", trend.amount)
+                        )
+                        .foregroundStyle(.indigo)
+                    }
                 }
-            }
-            .frame(height: 180)
-            .padding()
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(12)
-            .padding(.horizontal)
-        }
-    }
-}
-
-struct MonthlyFlowChartView: View {
-    let monthlyIncome: Double
-    let monthlyExpense: Double
-    
-    var body: some View {
-        VStack(alignment: .leading) {
-            Text("This Month's Flow")
-                .font(.headline)
+                .frame(height: 160)
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(16)
                 .padding(.horizontal)
-            
-            Chart {
-                BarMark(x: .value("Type", "Income"), y: .value("Amount", monthlyIncome))
-                    .foregroundStyle(.green.gradient)
-                BarMark(x: .value("Type", "Expense"), y: .value("Amount", monthlyExpense))
-                    .foregroundStyle(.red.gradient)
             }
-            .frame(height: 150)
-            .padding()
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(12)
-            .padding(.horizontal)
         }
     }
 }
 
-struct CategoryBreakdownView: View {
+// Lifetime Expenses (replaces CategoryBreakdownView)
+struct LifetimeExpensesView: View {
     let transactions: [Transaction]
-    let monthlyExpense: Double
     
     struct CategoryData: Identifiable {
         var id: String { name }
@@ -170,65 +230,65 @@ struct CategoryBreakdownView: View {
         let amount: Double
     }
     
+    var lifetimeTotalExpense: Double {
+        transactions.filter { MonthlyStats.isSpending($0) }.reduce(0) { $0 + $1.amount }
+    }
+    
     var categoryBreakdown: [CategoryData] {
-        let expenses = transactions.filter { $0.type == .expense }
-        let grouped = Dictionary(grouping: expenses, by: { $0.category })
-        return grouped.map { (key, transactions) in
-            let total = transactions.reduce(0) { $0 + $1.amount }
-            return CategoryData(name: key, amount: total)
-        }
-        .sorted { $0.amount > $1.amount }
+        let expenses = transactions.filter { MonthlyStats.isSpending($0) }
+        let grouped = Dictionary(grouping: expenses) { $0.category }
+        return grouped.map { CategoryData(name: $0.key, amount: $0.value.reduce(0) { $0 + $1.amount }) }
+            .sorted { $0.amount > $1.amount }
     }
     
     var body: some View {
-        VStack(alignment: .leading) {
-            Text("Top Expenses")
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Overall Expenses")
                 .font(.headline)
                 .padding(.horizontal)
             
             if categoryBreakdown.isEmpty {
-                Text("No expenses this month")
-                    .font(.caption)
+                Text("No expenses recorded yet")
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 150)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(16)
                     .padding(.horizontal)
             } else {
-                Chart(categoryBreakdown.prefix(5)) { item in
-                    SectorMark(
-                        angle: .value("Amount", item.amount),
-                        innerRadius: .ratio(0.6),
-                        angularInset: 1.5
-                    )
-                    .cornerRadius(5)
-                    .foregroundStyle(Category.color(for: item.name))
-                    .annotation(position: .overlay) {
-                        if item.amount / monthlyExpense > 0.1 { // Only show label if > 10%
-                            Text(item.name.prefix(1)) // Just first letter to save space
-                                .font(.caption2)
-                                .foregroundColor(.white)
-                                .bold()
+                HStack(spacing: 16) {
+                    // Pie Chart
+                    Chart(categoryBreakdown.prefix(6)) { item in
+                        SectorMark(
+                            angle: .value("Amount", item.amount),
+                            innerRadius: .ratio(0.55),
+                            angularInset: 1
+                        )
+                        .foregroundStyle(Category.color(for: item.name))
+                        .cornerRadius(4)
+                    }
+                    .frame(width: 140, height: 140)
+                    
+                    // Legend
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(categoryBreakdown.prefix(6)) { item in
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Category.color(for: item.name))
+                                    .frame(width: 8, height: 8)
+                                Text(item.name)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text("\(Int(item.amount / lifetimeTotalExpense * 100))%")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                 }
-                .frame(height: 200)
                 .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-                .padding(.horizontal)
-                
-                // Legend
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 10) {
-                    ForEach(categoryBreakdown.prefix(5)) { item in
-                        HStack(spacing: 4) {
-                            Circle().fill(Category.color(for: item.name)).frame(width: 8, height: 8)
-                            Text("\(item.name) (\(Int(item.amount / monthlyExpense * 100))%)")
-                                .font(.caption)
-                                .lineLimit(1)
-                        }
-                    }
-                }
+                .background(Color(.systemGray6))
+                .cornerRadius(16)
                 .padding(.horizontal)
             }
         }
@@ -237,6 +297,10 @@ struct CategoryBreakdownView: View {
 
 struct RecentTransactionsView: View {
     let transactions: [Transaction]
+    
+    var recentTransactions: [Transaction] {
+        transactions.sorted { $0.date > $1.date }.prefix(3).map { $0 }
+    }
     
     var body: some View {
         VStack(alignment: .leading) {
@@ -247,8 +311,8 @@ struct RecentTransactionsView: View {
             }
             .padding(.horizontal)
             
-            // Just show top 3 for brevity in dashboard
-            ForEach(transactions.prefix(3)) { tx in
+            // Show 3 most recent transactions
+            ForEach(recentTransactions) { tx in
                 TransactionRow(transaction: tx)
             }
             .padding(.horizontal)

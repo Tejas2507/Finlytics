@@ -5,7 +5,6 @@ struct SplashView: View {
     @Binding var isActive: Bool
     @Environment(\.modelContext) private var modelContext
     @Query private var transactions: [Transaction]
-    @AppStorage("geminiApiKey") private var apiKey: String = ""
     
     @State private var opacity = 0.5
     @State private var scale = 0.8
@@ -43,29 +42,13 @@ struct SplashView: View {
             }
         }
         .task {
-            // 1. Kick off Insight Generation
-            // We use a Task group or async let to run both the timer and the fetch concurrently
             await prepareApp()
         }
     }
     
     private func prepareApp() async {
-        let startTime = Date()
-        
-        // Start fetching insight
-        // We ignore the result here because the DashbaordView will pick up the persisted Insight from SwiftData
-        // or re-fetch (which will hit the cache/SwiftData since we just generated it).
-        // Actually, InsightEngine saves to context.
-        if !transactions.isEmpty && !apiKey.isEmpty {
-            _ = await InsightEngine.shared.fetchTodaysInsight(context: modelContext, transactions: transactions, apiKey: apiKey)
-        }
-        
-        // Ensure minimum 2 seconds display
-        let elapsed = Date().timeIntervalSince(startTime)
-        let remaining = 2.0 - elapsed
-        if remaining > 0 {
-            try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-        }
+        // Just wait for splash animation - DashboardView handles insight fetch with cooldown
+        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
         
         // Transition
         withAnimation {

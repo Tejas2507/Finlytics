@@ -6,6 +6,7 @@ import UIKit
 
 struct SmartBudgetView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var tutorialManager: TutorialManager
     @Query private var budgets: [Budget]
     @Query private var transactions: [Transaction]
     
@@ -29,7 +30,7 @@ struct SmartBudgetView: View {
         let calendar = Calendar.current
         let now = Date()
         let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
-        return transactions.filter { $0.date >= startOfMonth && $0.type == .expense }
+        return transactions.filter { $0.date >= startOfMonth && MonthlyStats.isSpending($0) }
     }
     
     func spentAmount(for category: String) -> Double {
@@ -42,7 +43,10 @@ struct SmartBudgetView: View {
         NavigationView {
             List(selection: $selection) {
                 Section {
-                    Button(action: generateBudgets) {
+                    Button(action: {
+                        tutorialManager.completeStep(.budgeting)
+                        generateBudgets()
+                    }) {
                         HStack {
                             Image(systemName: "wand.and.stars")
                                 .foregroundColor(.indigo)
@@ -55,6 +59,7 @@ struct SmartBudgetView: View {
                         }
                     }
                     .disabled(isGenerating)
+                    .tutorialTarget(.budgeting)
                 } footer: {
                     Text("AI analyzes your current month's expenses to suggest realistic monthly limits.")
                 }
@@ -139,6 +144,14 @@ struct SmartBudgetView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(alertMessage)
+            }
+            .onChange(of: budgets.count) { oldCount, newCount in
+                if newCount > oldCount {
+                    tutorialManager.completeStep(.budgeting)
+                }
+            }
+            .onChange(of: budgets.count) { oldCount, newCount in
+                // Track budget count
             }
         }
     }

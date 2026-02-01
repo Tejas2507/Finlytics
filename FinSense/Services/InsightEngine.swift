@@ -11,6 +11,7 @@ class InsightEngine {
     // MARK: - Rich Financial Context
     struct FinancialContext {
         let topCategory: (name: String, amount: Double, percent: Int)
+        let secondCategory: (name: String, amount: Double, percent: Int)?  // NEW
         let avgDailySpend: Double
         let highestExpense: (merchant: String, amount: Double)?
         let daysSinceInvestment: Int?
@@ -18,6 +19,15 @@ class InsightEngine {
         let daysLeftInMonth: Int
         let projectedMonthEnd: Double
         let totalThisMonth: Double
+        // NEW FIELDS
+        let weekendSpend: Double
+        let weekdaySpend: Double
+        let mostFrequentMerchant: (name: String, count: Int)?
+        let transactionCount: Int
+        let avgTransactionSize: Double
+        let incomeThisMonth: Double
+        let savingsRate: Int  // (income - expenses) / income * 100
+        let biggestSpendingDay: (day: String, amount: Double)?
     }
     
     // MARK: - Build Context from Transactions
@@ -27,18 +37,24 @@ class InsightEngine {
         let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
         let startOfLastMonth = calendar.date(byAdding: .month, value: -1, to: startOfMonth) ?? now
         
-        // This month's expenses
-        let thisMonthExpenses = transactions.filter { $0.date >= startOfMonth && $0.type == .expense }
-        let lastMonthExpenses = transactions.filter { $0.date >= startOfLastMonth && $0.date < startOfMonth && $0.type == .expense }
+        // This month's expenses (spending only, exclude investments)
+        let thisMonthExpenses = transactions.filter { $0.date >= startOfMonth && MonthlyStats.isSpending($0) }
+        let lastMonthExpenses = transactions.filter { $0.date >= startOfLastMonth && $0.date < startOfMonth && MonthlyStats.isSpending($0) }
+        let thisMonthIncome = transactions.filter { $0.date >= startOfMonth && $0.type == .income }
         
         let thisMonthTotal = thisMonthExpenses.reduce(0) { $0 + $1.amount }
         let lastMonthTotal = lastMonthExpenses.reduce(0) { $0 + $1.amount }
+        let incomeTotal = thisMonthIncome.reduce(0) { $0 + $1.amount }
         
-        // Top category
+        // Top categories (1st and 2nd)
         let grouped = Dictionary(grouping: thisMonthExpenses) { $0.category }
-        let topCat = grouped.max(by: { $0.value.reduce(0) { $0 + $1.amount } < $1.value.reduce(0) { $0 + $1.amount } })
-        let topCatAmount = topCat?.value.reduce(0) { $0 + $1.amount } ?? 0
-        let topCatPercent = thisMonthTotal > 0 ? Int((topCatAmount / thisMonthTotal) * 100) : 0
+        let sortedCategories = grouped.map { ($0.key, $0.value.reduce(0) { $0 + $1.amount }) }
+            .sorted { $0.1 > $1.1 }
+        
+        let topCat = sortedCategories.first
+        let topCatPercent = thisMonthTotal > 0 ? Int((topCat?.1 ?? 0) / thisMonthTotal * 100) : 0
+        let secondCat = sortedCategories.count > 1 ? sortedCategories[1] : nil
+        let secondCatPercent = thisMonthTotal > 0 && secondCat != nil ? Int(secondCat!.1 / thisMonthTotal * 100) : 0
         
         // Average daily spend
         let dayOfMonth = calendar.component(.day, from: now)
@@ -61,91 +77,201 @@ class InsightEngine {
         let daysLeft = daysInMonth - dayOfMonth
         let projected = avgDaily * Double(daysInMonth)
         
+        // NEW: Weekend vs Weekday spending
+        let weekendExpenses = thisMonthExpenses.filter {
+            let weekday = calendar.component(.weekday, from: $0.date)
+            return weekday == 1 || weekday == 7 // Sunday = 1, Saturday = 7
+        }
+        let weekendTotal = weekendExpenses.reduce(0) { $0 + $1.amount }
+        let weekdayTotal = thisMonthTotal - weekendTotal
+        
+        // NEW: Most frequent merchant
+        let merchantCounts = Dictionary(grouping: thisMonthExpenses) { $0.merchant }
+            .mapValues { $0.count }
+            .sorted { $0.value > $1.value }
+        let topMerchant = merchantCounts.first
+        
+        // NEW: Transaction stats
+        let txCount = thisMonthExpenses.count
+        let avgTxSize = txCount > 0 ? thisMonthTotal / Double(txCount) : 0
+        
+        // Savings rate: use monthlySalary from Settings - projected spending (not earned income)
+        let monthlySalary = UserDefaults.standard.double(forKey: "monthlySalary")
+        let savingsRate = monthlySalary > 0 ? Int(((monthlySalary - projected) / monthlySalary) * 100) : 0
+        
+        // NEW: Biggest spending day
+        let dailySpending = Dictionary(grouping: thisMonthExpenses) { 
+            calendar.startOfDay(for: $0.date) 
+        }.mapValues { $0.reduce(0) { $0 + $1.amount } }
+        let biggestDay = dailySpending.max(by: { $0.value < $1.value })
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "EEEE" // Day name
+        let biggestDayName = biggestDay.map { dayFormatter.string(from: $0.key) }
+        
         return FinancialContext(
-            topCategory: (topCat?.key ?? "Unknown", topCatAmount, topCatPercent),
+            topCategory: (topCat?.0 ?? "Unknown", topCat?.1 ?? 0, topCatPercent),
+            secondCategory: secondCat.map { ($0.0, $0.1, secondCatPercent) },
             avgDailySpend: avgDaily,
             highestExpense: highest.map { ($0.merchant, $0.amount) },
             daysSinceInvestment: daysSinceInvest,
             spendingTrend: trend,
             daysLeftInMonth: daysLeft,
             projectedMonthEnd: projected,
-            totalThisMonth: thisMonthTotal
+            totalThisMonth: thisMonthTotal,
+            weekendSpend: weekendTotal,
+            weekdaySpend: weekdayTotal,
+            mostFrequentMerchant: topMerchant.map { ($0.key, $0.value) },
+            transactionCount: txCount,
+            avgTransactionSize: avgTxSize,
+            incomeThisMonth: incomeTotal,
+            savingsRate: savingsRate,
+            biggestSpendingDay: biggestDay.map { (biggestDayName ?? "Unknown", $0.value) }
         )
     }
     
-    // MARK: - Check if New Insight Needed (6-hour rotation)
-    private func shouldGenerateNewInsight() -> Bool {
-        let lastTime = UserDefaults.standard.object(forKey: "lastInsightTime") as? Date ?? .distantPast
-        let hoursSince = Calendar.current.dateComponents([.hour], from: lastTime, to: Date()).hour ?? 99
-        return hoursSince >= 6
+    // MARK: - Simple Cache System
+    private let cacheMessageKey = "cachedInsightMessage"
+    private let cacheTimestampKey = "cachedInsightTimestamp"
+    private let cacheTitleKey = "cachedInsightTitle"
+    
+    private func getCachedInsight() -> (title: String, message: String)? {
+        guard let message = UserDefaults.standard.string(forKey: cacheMessageKey),
+              let title = UserDefaults.standard.string(forKey: cacheTitleKey),
+              let timestamp = UserDefaults.standard.object(forKey: cacheTimestampKey) as? Date else {
+            print("DEBUG CACHE: No cached insight found")
+            return nil
+        }
+        
+        let hoursSince = Calendar.current.dateComponents([.hour], from: timestamp, to: Date()).hour ?? 99
+        print("DEBUG CACHE: Found cached insight from \(hoursSince) hours ago")
+        
+        if hoursSince < 4 {
+            print("DEBUG CACHE: Cache is VALID (< 4 hours) - returning cached insight")
+            return (title, message)
+        } else {
+            print("DEBUG CACHE: Cache EXPIRED (>= 4 hours) - will fetch new")
+            clearCache()
+            return nil
+        }
     }
     
-    private func markInsightGenerated() {
-        UserDefaults.standard.set(Date(), forKey: "lastInsightTime")
+    private func saveToCache(title: String, message: String) {
+        UserDefaults.standard.set(message, forKey: cacheMessageKey)
+        UserDefaults.standard.set(title, forKey: cacheTitleKey)
+        UserDefaults.standard.set(Date(), forKey: cacheTimestampKey)
+        UserDefaults.standard.synchronize()
+        print("DEBUG CACHE: Saved new insight to cache")
+    }
+    
+    private func clearCache() {
+        UserDefaults.standard.removeObject(forKey: cacheMessageKey)
+        UserDefaults.standard.removeObject(forKey: cacheTitleKey)
+        UserDefaults.standard.removeObject(forKey: cacheTimestampKey)
+        UserDefaults.standard.synchronize()
     }
     
     // MARK: - Main Fetch Method
     func fetchTodaysInsight(context: ModelContext, transactions: [Transaction], apiKey: String) async -> Insight? {
-        // 1. Check for recent valid insight (within 6 hours)
-        let descriptor = FetchDescriptor<Insight>(
-            sortBy: [SortDescriptor(\.generatedDate, order: .reverse)]
-        )
         
-        do {
-            let existingInsights = try context.fetch(descriptor)
-            
-            // Clean up error insights
-            for insight in existingInsights {
-                if insight.message.lowercased().contains("api key") || insight.message.lowercased().contains("configure") {
-                    context.delete(insight)
-                }
-            }
-            
-            // Check if we have a valid recent insight
-            if !shouldGenerateNewInsight(), let recent = existingInsights.first(where: { !$0.message.lowercased().contains("api key") }) {
-                return recent
-            }
-        } catch {
-            print("Error fetching insights: \(error)")
+        // STEP 1: Check cache FIRST - if valid, return immediately (NO API CALL)
+        if let cached = getCachedInsight() {
+            return Insight(
+                title: cached.title,
+                message: cached.message,
+                category: .savingsTip,
+                relevanceScore: 1.0
+            )
         }
         
-        // 2. Generate new insight
+        // STEP 2: Cache empty or expired - generate new insight via API
+        print("DEBUG: Making API call for new insight...")
         guard !transactions.isEmpty else {
-            return Insight(
+            let welcomeInsight = Insight(
                 title: "Welcome",
                 message: "Add transactions to see personalized insights here!",
                 category: .savingsTip,
                 relevanceScore: 1.0
             )
+            context.insert(welcomeInsight)
+            try? context.save()
+            print("DEBUG: Created Welcome insight")
+            return welcomeInsight
         }
         
         guard !apiKey.isEmpty else {
-            return nil // Don't show error, just hide insight
+            let setupInsight = Insight(
+                title: "Setup",
+                message: "Add your Gemini API Key in Settings to unlock AI-powered insights!",
+                category: .savingsTip,
+                relevanceScore: 1.0
+            )
+            context.insert(setupInsight)
+            try? context.save()
+            print("DEBUG: Created Setup insight")
+            return setupInsight
         }
         
         let financialContext = buildContext(from: transactions)
         
         do {
-            let message = try await GeminiService.shared.generateSmartInsight(context: financialContext, apiKey: apiKey)
+            // 70% chance for Personal Insight, 30% for General Tip
+            let isPersonalized = Int.random(in: 1...100) <= 70 && financialContext.totalThisMonth > 0
             
-            // Validate response
-            if message.lowercased().contains("api key") || message.isEmpty {
-                return nil
+            let message: String
+            let category: InsightCategory
+            
+            print("DEBUG: Calling Gemini API for \(isPersonalized ? "personalized" : "general") insight...")
+            
+            if isPersonalized {
+                message = try await GeminiService.shared.generateSmartInsight(context: financialContext, apiKey: apiKey)
+                category = .optimization
+            } else {
+                message = try await GeminiService.shared.generateGeneralTip(apiKey: apiKey)
+                category = .savingsTip
+            }
+            
+            print("DEBUG: Got response: \(message.prefix(50))...")
+            
+            // If empty response, create error insight instead of returning nil
+            guard !message.isEmpty else {
+                let emptyInsight = Insight(
+                    title: "System",
+                    message: "AI returned empty response. Try again later.",
+                    category: .savingsTip,
+                    relevanceScore: 0.0
+                )
+                context.insert(emptyInsight)
+                try? context.save()
+                return emptyInsight
             }
             
             let newInsight = Insight(
-                title: "Insight",
+                title: isPersonalized ? "Insight" : "Tip",
                 message: message,
-                category: .savingsTip,
+                category: category,
                 relevanceScore: 1.0
             )
             
             context.insert(newInsight)
-            markInsightGenerated()
+            try? context.save()
+            
+            // SAVE TO CACHE for 4 hours
+            let title = isPersonalized ? "Insight" : "Tip"
+            saveToCache(title: title, message: message)
+            
+            print("DEBUG: Successfully created and cached insight: \(title)")
             return newInsight
         } catch {
-            print("Error generating insight: \(error)")
-            return nil
+            print("DEBUG: Error generating insight: \(error)")
+            let errorInsight = Insight(
+                title: "System",
+                message: "Couldn't contact AI service. Please check your internet or API Key settings.",
+                category: .savingsTip,
+                relevanceScore: 0.0
+            )
+            context.insert(errorInsight)
+            try? context.save()
+            return errorInsight
         }
     }
 }

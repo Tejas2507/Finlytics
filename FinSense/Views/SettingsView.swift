@@ -4,11 +4,12 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var tutorialManager: TutorialManager
     @Query private var transactions: [Transaction]
     
     @AppStorage("monthlySalary") private var monthlySalary: Double = 0.0
     @AppStorage("appTheme") private var appTheme: String = "System"
-    @AppStorage("aiModel") private var aiModel: String = "gemini-2.5-flash"
+    @AppStorage("aiModel") private var aiModel: String = "gemini-flash-lite-latest"
     
     @State private var apiKey: String = ""
     @State private var isSaved: Bool = false
@@ -16,45 +17,25 @@ struct SettingsView: View {
     @State private var showImportAlert: Bool = false
     @State private var importMessage: String = ""
     
-    // Demo Data
-    @State private var isSeeding = false
     @State private var showAPIKeyHelp = false
     
     var body: some View {
         NavigationView {
-            Form {
-                Section("Appearance") {
-                    Picker("Theme", selection: $appTheme) {
-                        Text("System").tag("System")
-                        Text("Light").tag("Light")
-                        Text("Dark").tag("Dark")
-                    }
-                    .pickerStyle(.segmented)
-                }
-                
-                Section("Monthly Income") {
-                    TextField("Salary / Regular Income", value: $monthlySalary, format: .number)
-                        #if os(iOS)
-                        .keyboardType(.numberPad)
-                        .toolbar {
-                            ToolbarItemGroup(placement: .keyboard) {
-                                Spacer()
-                                Button("Done") {
-                                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                }
-                            }
+            ScrollViewReader { proxy in
+                Form {
+                    Section("Appearance") {
+                        Picker("Theme", selection: $appTheme) {
+                            Text("System").tag("System")
+                            Text("Light").tag("Light")
+                            Text("Dark").tag("Dark")
                         }
-                        #endif
-                    
-                    if monthlySalary > 0 {
-                        Text("₹\(Int(monthlySalary).formatted())")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        .pickerStyle(.segmented)
                     }
-                }
-                
+                    
+
+                // Account & AI Setup (Unified Section for Tutorial)
                 Section(header: HStack {
-                    Text("AI Configuration")
+                    Text("Account & Configuration")
                     Spacer()
                     Button {
                         showAPIKeyHelp = true
@@ -63,20 +44,56 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }) {
-                    Picker("Model", selection: $aiModel) {
-                        Text("Flash (Fast)").tag("gemini-2.5-flash")
-                        Text("Pro (Smart)").tag("gemini-2.5-pro")
+                    // Income Row
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Monthly Income")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        TextField("Salary / Regular Income", value: $monthlySalary, format: .number)
+                            #if os(iOS)
+                            .keyboardType(.numberPad)
+                            .toolbar {
+                                ToolbarItemGroup(placement: .keyboard) {
+                                    Spacer()
+                                    Button("Done") {
+                                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                    }
+                                }
+                            }
+                            #endif
                     }
+                    .tutorialTarget(.settingsSetup)
                     
-                    SecureField("Gemini API Key", text: $apiKey)
-                        .textContentType(.password)
+                    // AI Config Rows
+                    Picker("AI Model", selection: $aiModel) {
+                        Text("Gemini Flash Lite").tag("gemini-flash-lite-latest")
+                        Text("Gemini 2.5 Flash").tag("gemini-2.5-flash")
+                    }
+                    .tutorialTarget(.settingsSetup)
                     
-                    Button("Save Key") {
-                        KeychainHelper.shared.save(apiKey, for: "gemini_api_key")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Gemini API Key")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        SecureField("Paste API Key here", text: $apiKey)
+                            .textContentType(.password)
+                    }
+                    .tutorialTarget(.settingsSetup)
+                    
+                    Button("Save Configuration") {
+                        let cleanedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                        KeychainHelper.shared.save(cleanedKey, for: "gemini_api_key")
+                        apiKey = cleanedKey
                         isSaved = true
+                        
+                        if monthlySalary > 0 {
+                            tutorialManager.completeStep(.settingsSetup)
+                        }
                     }
                     .disabled(apiKey.isEmpty)
+                    .tutorialTarget(.settingsSetup)
                 }
+                .id("settingsTop")
                 
                 Section("Data Management") {
                     ShareLink(item: generateExportFile(), preview: SharePreview("Finlytics Data", image: Image(systemName: "tablecells"))) {
@@ -90,21 +107,32 @@ struct SettingsView: View {
                     }
                 }
                 
-                Section("Developer Options") {
-                    Button(action: seedDemoData) {
-                        HStack {
-                            Text("Generate Demo Data (3 Months)")
-                            if isSeeding {
-                                Spacer()
-                                ProgressView()
-                            }
-                        }
+                Section("Help") {
+                    Button {
+                        tutorialManager.startTutorial()
+                    } label: {
+                        Label("Run Tutorial", systemImage: "play.circle")
                     }
-                    .disabled(isSeeding)
                 }
                 
                 Section("About") {
                     Text("Finlytics Local-First v1.0")
+                }
+            }
+                .onAppear {
+                    // Auto-scroll to top when tutorial is active
+                    if tutorialManager.currentStep == .settingsSetup {
+                        withAnimation {
+                            proxy.scrollTo("settingsTop", anchor: .top)
+                        }
+                    }
+                }
+                .onChange(of: tutorialManager.currentStep) { step in
+                    if step == .settingsSetup {
+                        withAnimation {
+                            proxy.scrollTo("settingsTop", anchor: .top)
+                        }
+                    }
                 }
             }
             .navigationTitle("Settings")
@@ -170,17 +198,7 @@ struct SettingsView: View {
         }
     }
     
-    private func seedDemoData() {
-        isSeeding = true
-        Task {
-            DataSeeder.shared.generateDemoData(modelContext: modelContext)
-            await MainActor.run {
-                importMessage = "Added 3 months of test data!"
-                showImportAlert = true
-                isSeeding = false
-            }
-        }
-    }
+
 }
 
 #Preview {

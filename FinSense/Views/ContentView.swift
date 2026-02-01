@@ -3,42 +3,65 @@ import SwiftData
 
 struct ContentView: View {
     @AppStorage("appTheme") private var appTheme: String = "System"
+    @StateObject private var tutorialManager = TutorialManager.shared
     @State private var showingAddSheet = false
     
     var body: some View {
-        TabView {
-            DashboardView()
-                .tabItem {
-                    Label("Dashboard", systemImage: "chart.bar.fill")
-                }
+        ZStack {
+            TabView(selection: $tutorialManager.selectedTab) {
+                DashboardView()
+                    .tag(0)
+                    .tabItem {
+                        Label("Dashboard", systemImage: "chart.bar.fill")
+                    }
+                
+                TransactionsView()
+                    .tag(1)
+                    .tabItem {
+                        Label("Transactions", systemImage: "list.bullet.rectangle")
+                    }
+                
+                AIInsightsView()
+                    .tag(2)
+                    .tabItem {
+                        Label("AI Chat", systemImage: "sparkles")
+                    }
+                
+                SmartBudgetView()
+                    .tag(3)
+                    .tabItem {
+                        Label("Budget", systemImage: "chart.pie.fill")
+                    }
+                
+                SettingsView()
+                    .tag(4)
+                    .tabItem {
+                        Label("Settings", systemImage: "gear")
+                    }
+            }
+            .tint(Color.indigo)
+            .preferredColorScheme(theme)
+            .sheet(isPresented: $showingAddSheet) {
+                AddTransactionView()
+            }
+            .environmentObject(tutorialManager)
             
-            TransactionsView()
-                .tabItem {
-                    Label("Transactions", systemImage: "list.bullet.rectangle")
+            // Tutorial overlay
+            if tutorialManager.showWelcome {
+                WelcomeView {
+                    withAnimation {
+                        tutorialManager.startInteractive()
+                    }
                 }
-            
-            AIInsightsView()
-                .tabItem {
-                    Label("AI Chat", systemImage: "sparkles")
-                }
-            
-            SmartBudgetView()
-                .tabItem {
-                    Label("Budget", systemImage: "chart.pie.fill")
-                }
-            
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gear")
-                }
+                .transition(.opacity)
+                .zIndex(2)
+            } else if tutorialManager.isActive && tutorialManager.currentStep != .complete {
+                TutorialOverlay(tutorialManager: tutorialManager)
+                    .zIndex(1)
+            }
         }
-        .tint(Color.indigo) // Use Indigo as requested for neutral primary
-        .preferredColorScheme(theme)
-        // Let's rely on standard UI patterns first: Toolbar button on Dashboard/Transactions.
-        // Or actually, a central specialized tab that opens the sheet immediately? 
-        // For now, let's attach the sheet to the TabView.
-        .sheet(isPresented: $showingAddSheet) {
-            AddTransactionView()
+        .onPreferenceChange(TutorialTargetKey.self) { rects in
+            tutorialManager.spotlightRects = rects
         }
     }
     

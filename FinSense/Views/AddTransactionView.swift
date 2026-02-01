@@ -10,6 +10,7 @@ import AppKit
 struct AddTransactionView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query private var allTransactions: [Transaction]
     
     // Optional transaction for editing
     var existingTransaction: Transaction? = nil
@@ -20,6 +21,7 @@ struct AddTransactionView: View {
     @State private var notes: String = ""
     @State private var selectedType: TransactionType = .expense
     @State private var selectedCategory: String = "Food & Dining"
+    @State private var showMerchantSuggestions = false
     
     // For Smart Paste alert
     @State private var showPasteAlert = false
@@ -28,6 +30,23 @@ struct AddTransactionView: View {
     
     var categories: [String] {
         selectedType == .expense ? Category.expenseCategories : Category.incomeCategories
+    }
+    
+    // Unique merchants from history with their most common category
+    var merchantHistory: [(merchant: String, category: String)] {
+        let merchants = Dictionary(grouping: allTransactions) { $0.merchant.lowercased() }
+        return merchants.compactMap { key, transactions in
+            guard let first = transactions.first else { return nil }
+            // Find most common category for this merchant
+            let categoryCounts = Dictionary(grouping: transactions) { $0.category }
+            let mostCommon = categoryCounts.max(by: { $0.value.count < $1.value.count })?.key ?? first.category
+            return (first.merchant, mostCommon)
+        }.sorted { $0.merchant < $1.merchant }
+    }
+    
+    var filteredMerchants: [(merchant: String, category: String)] {
+        guard !merchant.isEmpty else { return [] }
+        return merchantHistory.filter { $0.merchant.lowercased().contains(merchant.lowercased()) }
     }
     
     var body: some View {
@@ -55,7 +74,51 @@ struct AddTransactionView: View {
                         #endif
                         .font(.title3)
                     
-                    TextField("Merchant / Source", text: $merchant)
+                    // Merchant with autocomplete
+                    VStack(alignment: .leading, spacing: 0) {
+                        TextField("Merchant / Source", text: $merchant)
+                            .onChange(of: merchant) {
+                                showMerchantSuggestions = !filteredMerchants.isEmpty && merchant.count >= 2
+                            }
+                        
+                        if showMerchantSuggestions {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    ForEach(filteredMerchants.prefix(5), id: \.merchant) { item in
+                                        Button {
+                                            merchant = item.merchant
+                                            // Auto-select category
+                                            if categories.contains(item.category) {
+                                                selectedCategory = item.category
+                                            }
+                                            showMerchantSuggestions = false
+                                        } label: {
+                                            HStack {
+                                                Image(systemName: Category.icon(for: item.category))
+                                                    .foregroundColor(Category.color(for: item.category))
+                                                    .frame(width: 24)
+                                                VStack(alignment: .leading) {
+                                                    Text(item.merchant)
+                                                        .foregroundColor(.primary)
+                                                    Text(item.category)
+                                                        .font(.caption)
+                                                        .foregroundColor(.secondary)
+                                                }
+                                                Spacer()
+                                            }
+                                            .padding(.vertical, 8)
+                                            .padding(.horizontal, 4)
+                                        }
+                                        Divider()
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 150)
+                            .background(Color(.systemBackground))
+                            .cornerRadius(8)
+                            .shadow(radius: 2)
+                        }
+                    }
                     
                     DatePicker("Date", selection: $date, displayedComponents: .date)
                     

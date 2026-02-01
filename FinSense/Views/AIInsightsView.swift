@@ -20,6 +20,7 @@ struct Message: Identifiable, Codable {
 struct AIInsightsView: View {
     @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
     @Query private var budgets: [Budget]
+    @EnvironmentObject var tutorialManager: TutorialManager
     @AppStorage("monthlySalary") private var monthlySalary: Double = 0.0
     
     @State private var messages: [Message] = [
@@ -81,6 +82,9 @@ struct AIInsightsView: View {
                     }
                     .disabled(inputText.isEmpty || isGenerating)
                 }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .tutorialTarget(.aiChat)
                 .padding()
                 .background(.ultraThinMaterial)
             }
@@ -107,6 +111,8 @@ struct AIInsightsView: View {
         messages.append(userMsg)
         inputText = ""
         isGenerating = true
+        
+        tutorialManager.completeStep(.aiChat)
         
         Task {
             let apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""

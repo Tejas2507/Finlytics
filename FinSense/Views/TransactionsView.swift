@@ -3,6 +3,7 @@ import SwiftData
 
 struct TransactionsView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var tutorialManager: TutorialManager
     @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
     
     @State private var searchText = ""
@@ -122,6 +123,7 @@ struct TransactionsView: View {
                             Image(systemName: "plus.circle.fill")
                                 .font(.title3)
                         }
+                        .tutorialTarget(.addTransaction)
                     }
                 }
             }
@@ -130,6 +132,11 @@ struct TransactionsView: View {
             }
             .sheet(item: $editingTransaction) { transaction in
                 AddTransactionView(existingTransaction: transaction)
+            }
+            .onChange(of: transactions.count) { oldCount, newCount in
+                if newCount > oldCount {
+                    tutorialManager.completeStep(.addTransaction)
+                }
             }
         }
     }
