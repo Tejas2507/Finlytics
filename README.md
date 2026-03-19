@@ -96,7 +96,7 @@
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/Finlytics.git
+   git clone https://github.com/Tejas2507/Finlytics.git
    cd Finlytics
    ```
 
