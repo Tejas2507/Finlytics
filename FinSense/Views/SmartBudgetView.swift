@@ -170,7 +170,7 @@ struct SmartBudgetView: View {
             }
             
             do {
-                let jsonString = try await GeminiService.shared.generateBudgetSuggestions(history: transactions, apiKey: apiKey)
+                let jsonString = try await AIManager.shared.generateBudgetSuggestions(history: transactions)
                 
                 guard let data = jsonString.data(using: .utf8) else { throw NSError(domain: "App", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid data"]) }
                 
@@ -218,20 +218,30 @@ struct BudgetRow: View {
         return min(spent / limit, 1.0)
     }
     
-    var color: Color {
+    var progressColor: Color {
         if spent > limit { return .red }
         if spent > limit * 0.8 { return .orange }
         return .green
     }
     
+    var percentText: String {
+        guard limit > 0 else { return "—" }
+        return "\(Int(spent / limit * 100))%"
+    }
+    
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                HStack {
+                HStack(spacing: 8) {
                     Image(systemName: Category.icon(for: category))
-                        .foregroundColor(Category.color(for: category))
+                        .font(.body)
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Category.color(for: category).opacity(0.85))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     Text(category)
-                        .font(.headline)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
                 }
                 Spacer()
                 Text("\(spent, format: .currency(code: "INR")) / \(limit, format: .currency(code: "INR"))")
@@ -239,34 +249,35 @@ struct BudgetRow: View {
                     .foregroundColor(.secondary)
             }
             
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .frame(width: geometry.size.width, height: 8)
-                        .foregroundColor(Color.gray.opacity(0.1))
-                        .cornerRadius(4)
-                    
-                    Rectangle()
-                        .frame(width: geometry.size.width * progress, height: 8)
-                        .foregroundColor(color)
-                        .cornerRadius(4)
+            HStack(spacing: 8) {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .frame(width: geometry.size.width, height: 10)
+                            .foregroundColor(Color(.systemGray5))
+                        
+                        Capsule()
+                            .frame(width: max(geometry.size.width * progress, 6), height: 10)
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [progressColor.opacity(0.7), progressColor],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .animation(.easeInOut(duration: 0.6), value: progress)
+                    }
                 }
-            }
-            .frame(height: 8)
-        }
-        .padding(.vertical, 4)
-        .contextMenu {
-            Button {
-                // Edit action handled by parent view via selection
-            } label: {
-                Label("Edit", systemImage: "pencil")
-            }
-            Button(role: .destructive) {
-                // Delete action handled by parent
-            } label: {
-                Label("Delete", systemImage: "trash")
+                .frame(height: 10)
+                
+                Text(percentText)
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(progressColor)
+                    .frame(width: 36, alignment: .trailing)
             }
         }
+        .padding(.vertical, 6)
     }
 }
 

@@ -27,6 +27,7 @@ struct AddTransactionView: View {
     @State private var showPasteAlert = false
     @State private var pastedContent = ""
     @State private var isProcessingPaste = false
+    @State private var isHidden = false
     
     var categories: [String] {
         selectedType == .expense ? Category.expenseCategories : Category.incomeCategories
@@ -137,6 +138,17 @@ struct AddTransactionView: View {
                     TextField("Optional notes", text: $notes)
                 }
                 
+                if existingTransaction != nil {
+                    Section {
+                        Toggle(isOn: $isHidden) {
+                            Label("Hide Transaction", systemImage: "eye.slash")
+                        }
+                        .tint(.purple)
+                    } footer: {
+                        Text("Hidden transactions are excluded from the transactions list but still counted in all calculations.")
+                    }
+                }
+                
                 Section {
                     Button(action: performSmartPaste) {
                         if isProcessingPaste {
@@ -186,6 +198,7 @@ struct AddTransactionView: View {
                     notes = tx.notes
                     selectedType = tx.type
                     selectedCategory = tx.category
+                    isHidden = tx.isHidden
                 }
             }
             .alert("Smart Paste", isPresented: $showPasteAlert) {
@@ -205,6 +218,7 @@ struct AddTransactionView: View {
             tx.notes = notes
             tx.type = selectedType
             tx.category = selectedCategory
+            tx.isHidden = isHidden
         } else {
             // Create new
             let transaction = Transaction(
@@ -241,9 +255,8 @@ struct AddTransactionView: View {
         
         isProcessingPaste = true
         Task {
-            let apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
             do {
-                let parsed = try await GeminiService.shared.parseTransaction(from: string, apiKey: apiKey)
+                let parsed = try await AIManager.shared.parseTransaction(from: string)
                 
                 await MainActor.run {
                     if let newAmount = parsed.amount { self.amount = newAmount }

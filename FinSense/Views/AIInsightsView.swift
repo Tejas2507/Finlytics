@@ -35,7 +35,7 @@ struct AIInsightsView: View {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 16) {
+                        LazyVStack(spacing: 14) {
                             ForEach(messages) { message in
                                 ChatBubble(message: message)
                                     .id(message.id)
@@ -46,46 +46,56 @@ struct AIInsightsView: View {
                                     .id("typing")
                             }
                         }
-                        .padding()
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
                     }
+                    .scrollDismissesKeyboard(.interactively)
                     .onChange(of: messages.count) { _, _ in
-                        withAnimation {
+                        withAnimation(.easeOut(duration: 0.3)) {
                             proxy.scrollTo(messages.last?.id, anchor: .bottom)
                         }
                     }
                     .onChange(of: isGenerating) { _, _ in
                         if isGenerating {
-                            withAnimation {
+                            withAnimation(.easeOut(duration: 0.3)) {
                                 proxy.scrollTo("typing", anchor: .bottom)
                             }
                         }
                     }
                 }
                 
-                Divider()
-                
-                // Input Area
-                HStack(alignment: .bottom, spacing: 12) {
-                    TextField("Ask anything...", text: $inputText)
-                        .padding(12)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(20)
-                        .focused($isInputFocused)
-                        .lineLimit(1...5)
-                    
-                    Button {
-                        sendMessage()
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 32))
-                            .foregroundColor(inputText.isEmpty ? .gray : .indigo)
+                // Input Bar
+                VStack(spacing: 0) {
+                    Divider().opacity(0.3)
+                    HStack(alignment: .bottom, spacing: 10) {
+                        TextField("Ask anything...", text: $inputText, axis: .vertical)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color(.systemGray5))
+                            .clipShape(Capsule())
+                            .focused($isInputFocused)
+                            .lineLimit(1...4)
+                        
+                        Button {
+                            sendMessage()
+                        } label: {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 36, height: 36)
+                                .background(
+                                    inputText.isEmpty || isGenerating ?
+                                    AnyShapeStyle(Color.gray.opacity(0.4)) :
+                                    AnyShapeStyle(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                )
+                                .clipShape(Circle())
+                        }
+                        .disabled(inputText.isEmpty || isGenerating)
                     }
-                    .disabled(inputText.isEmpty || isGenerating)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .tutorialTarget(.aiChat)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-                .tutorialTarget(.aiChat)
-                .padding()
                 .background(.ultraThinMaterial)
             }
             .navigationTitle("AI Chat")
@@ -95,8 +105,9 @@ struct AIInsightsView: View {
                     Button {
                         messages = [Message(text: "Chat cleared. How can I help?", isUser: false)]
                     } label: {
-                        Image(systemName: "trash")
+                        Image(systemName: "arrow.counterclockwise")
                             .font(.subheadline)
+                            .foregroundColor(.secondary)
                     }
                 }
             }
@@ -112,23 +123,36 @@ struct AIInsightsView: View {
         inputText = ""
         isGenerating = true
         
+        // Append User to Chat Memory Buffer
+        var buffer = UserDefaults.standard.stringArray(forKey: "chatHistoryBuffer") ?? []
+        buffer.append("User: \(text)")
+        UserDefaults.standard.set(buffer, forKey: "chatHistoryBuffer")
+        
         tutorialManager.completeStep(.aiChat)
         
         Task {
-            let apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
             do {
-                let response = try await GeminiService.shared.generateResponse(
+                let response = try await AIManager.shared.generateResponse(
                     for: text,
                     context: transactions,
                     budgets: budgets,
-                    monthlySalary: monthlySalary,
-                    apiKey: apiKey
+                    monthlySalary: monthlySalary
                 )
                 
                 await MainActor.run {
                     withAnimation {
                         messages.append(Message(text: response, isUser: false))
                         isGenerating = false
+                    }
+                    
+                    // Append AI to Chat Memory Buffer
+                    var buffer = UserDefaults.standard.stringArray(forKey: "chatHistoryBuffer") ?? []
+                    buffer.append("AI: \(response)")
+                    UserDefaults.standard.set(buffer, forKey: "chatHistoryBuffer")
+                    
+                    // Trigger summarization if we hit 50 messages (25 interactions) to utilize long context
+                    if buffer.count >= 50 {
+                        AIPersonaEngine.shared.summarizeRecentChats()
                     }
                 }
             } catch {
@@ -146,23 +170,27 @@ struct ChatBubble: View {
     
     var body: some View {
         HStack(alignment: .bottom) {
-            if message.isUser { Spacer(minLength: 50) }
+            if message.isUser { Spacer(minLength: 40) }
             
             VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
                 FormattedMessageView(content: message.text, isUser: message.isUser)
-                    .padding(12)
-                    .background(message.isUser ? Color.indigo : Color.gray.opacity(0.1))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        message.isUser ?
+                        AnyShapeStyle(LinearGradient(colors: [.indigo, .purple.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing)) :
+                        AnyShapeStyle(Color(.systemGray5))
+                    )
                     .foregroundColor(message.isUser ? .white : .primary)
-                    .cornerRadius(18)
-                    .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
                 
                 Text(message.timestamp.formatted(date: .omitted, time: .shortened))
                     .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 4)
+                    .foregroundColor(.secondary.opacity(0.7))
+                    .padding(.horizontal, 6)
             }
             
-            if !message.isUser { Spacer(minLength: 50) }
+            if !message.isUser { Spacer(minLength: 40) }
         }
     }
 }
@@ -266,26 +294,28 @@ struct TableView: View {
 }
 
 struct TypingIndicator: View {
-    @State private var dotCount = 0
-    let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+    @State private var phase = 0.0
     
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    ForEach(0..<3) { index in
-                        Circle()
-                            .fill(Color.secondary)
-                            .frame(width: 6, height: 6)
-                            .opacity(dotCount % 4 > index ? 1 : 0.3)
-                    }
+            HStack(spacing: 5) {
+                ForEach(0..<3) { index in
+                    Circle()
+                        .fill(Color.indigo.opacity(0.6))
+                        .frame(width: 7, height: 7)
+                        .offset(y: sin(phase + Double(index) * 0.8) * 4)
                 }
-                .padding(12)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color(.systemGray5))
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .onAppear {
+                withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) {
+                    phase = .pi * 2
+                }
             }
             Spacer()
-        }
-        .onReceive(timer) { _ in
-            dotCount += 1
         }
     }
 }

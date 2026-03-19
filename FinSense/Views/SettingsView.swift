@@ -8,14 +8,12 @@ struct SettingsView: View {
     @Query private var transactions: [Transaction]
     
     @AppStorage("monthlySalary") private var monthlySalary: Double = 0.0
-    @AppStorage("appTheme") private var appTheme: String = "System"
+    @AppStorage("aiProvider") private var aiProvider: String = "gemini"
     @AppStorage("aiModel") private var aiModel: String = "gemini-flash-lite-latest"
     
-    @State private var apiKey: String = ""
+    @State private var geminiApiKey: String = ""
+    @State private var openAIApiKey: String = ""
     @State private var isSaved: Bool = false
-    @State private var isImporting: Bool = false
-    @State private var showImportAlert: Bool = false
-    @State private var importMessage: String = ""
     
     @State private var showAPIKeyHelp = false
     
@@ -23,104 +21,129 @@ struct SettingsView: View {
         NavigationView {
             ScrollViewReader { proxy in
                 Form {
-                    Section("Appearance") {
-                        Picker("Theme", selection: $appTheme) {
-                            Text("System").tag("System")
-                            Text("Light").tag("Light")
-                            Text("Dark").tag("Dark")
+                    // Account & AI Setup
+                    Section(header: HStack {
+                        Text("Account & Configuration")
+                        Spacer()
+                        Button {
+                            showAPIKeyHelp = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.secondary)
                         }
-                        .pickerStyle(.segmented)
-                    }
-                    
-
-                // Account & AI Setup (Unified Section for Tutorial)
-                Section(header: HStack {
-                    Text("Account & Configuration")
-                    Spacer()
-                    Button {
-                        showAPIKeyHelp = true
-                    } label: {
-                        Image(systemName: "info.circle")
-                            .foregroundColor(.secondary)
-                    }
-                }) {
-                    // Income Row
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Monthly Income")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        TextField("Salary / Regular Income", value: $monthlySalary, format: .number)
-                            #if os(iOS)
-                            .keyboardType(.numberPad)
-                            .toolbar {
-                                ToolbarItemGroup(placement: .keyboard) {
-                                    Spacer()
-                                    Button("Done") {
-                                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }) {
+                        // Income Row
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Monthly Income")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            TextField("Salary / Regular Income", value: $monthlySalary, format: .number)
+                                #if os(iOS)
+                                .keyboardType(.numberPad)
+                                .toolbar {
+                                    ToolbarItemGroup(placement: .keyboard) {
+                                        Spacer()
+                                        Button("Done") {
+                                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                        }
                                     }
                                 }
-                            }
-                            #endif
-                    }
-                    .tutorialTarget(.settingsSetup)
-                    
-                    // AI Config Rows
-                    Picker("AI Model", selection: $aiModel) {
-                        Text("Gemini Flash Lite").tag("gemini-flash-lite-latest")
-                        Text("Gemini 2.5 Flash").tag("gemini-2.5-flash")
-                    }
-                    .tutorialTarget(.settingsSetup)
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Gemini API Key")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        SecureField("Paste API Key here", text: $apiKey)
-                            .textContentType(.password)
-                    }
-                    .tutorialTarget(.settingsSetup)
-                    
-                    Button("Save Configuration") {
-                        let cleanedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-                        KeychainHelper.shared.save(cleanedKey, for: "gemini_api_key")
-                        apiKey = cleanedKey
-                        isSaved = true
+                                #endif
+                        }
+                        .tutorialTarget(.settingsSetup)
                         
-                        if monthlySalary > 0 {
-                            tutorialManager.completeStep(.settingsSetup)
+                        // Provider Toggle
+                        Picker("AI Provider", selection: $aiProvider) {
+                            Text("Google Gemini").tag("gemini")
+                            Text("OpenAI").tag("openai")
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: aiProvider) { newValue in
+                            if newValue == "gemini" {
+                                aiModel = "gemini-flash-lite-latest"
+                            } else {
+                                aiModel = "gpt-4o-mini"
+                            }
+                        }
+                        
+                        // AI Config Rows
+                        Picker("AI Model", selection: $aiModel) {
+                            if aiProvider == "gemini" {
+                                Text("Gemini Flash Lite").tag("gemini-flash-lite-latest")
+                                Text("Gemini 2.5 Flash").tag("gemini-2.5-flash")
+                            } else {
+                                Text("GPT 4o Mini").tag("gpt-4o-mini")
+                                Text("GPT 4o").tag("gpt-4o")
+                                Text("GPT 5 Nano").tag("gpt-5-nano")
+                                Text("GPT 3.5 Turbo").tag("gpt-3.5-turbo")
+                            }
+                        }
+                        .tutorialTarget(.settingsSetup)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(aiProvider == "gemini" ? "Gemini" : "OpenAI") API Key")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            if aiProvider == "gemini" {
+                                SecureField("Paste Gemini API Key", text: $geminiApiKey)
+                                    .textContentType(.password)
+                            } else {
+                                SecureField("Paste OpenAI API Key", text: $openAIApiKey)
+                                    .textContentType(.password)
+                            }
+                        }
+                        .tutorialTarget(.settingsSetup)
+                        
+                        Button("Save Configuration") {
+                            let cleanedGemini = geminiApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                            KeychainHelper.shared.save(cleanedGemini, for: "gemini_api_key")
+                            geminiApiKey = cleanedGemini
+                            
+                            let cleanedOpenAI = openAIApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                            KeychainHelper.shared.save(cleanedOpenAI, for: "openai_api_key")
+                            openAIApiKey = cleanedOpenAI
+                            
+                            isSaved = true
+                            
+                            if monthlySalary > 0 {
+                                tutorialManager.completeStep(.settingsSetup)
+                            }
+                        }
+                        .disabled(aiProvider == "gemini" ? geminiApiKey.isEmpty : openAIApiKey.isEmpty)
+                        .tutorialTarget(.settingsSetup)
+                    }
+                    .id("settingsTop")
+                    
+                    Section {
+                        NavigationLink {
+                            HiddenTransactionsView()
+                        } label: {
+                            Label("Vault", systemImage: "lock.fill")
+                                .foregroundColor(.purple)
                         }
                     }
-                    .disabled(apiKey.isEmpty)
-                    .tutorialTarget(.settingsSetup)
-                }
-                .id("settingsTop")
-                
-                Section("Data Management") {
-                    ShareLink(item: generateExportFile(), preview: SharePreview("Finlytics Data", image: Image(systemName: "tablecells"))) {
-                        Label("Export CSV", systemImage: "square.and.arrow.up")
+                    
+                    Section("Help") {
+                        Button {
+                            tutorialManager.startTutorial()
+                        } label: {
+                            Label("Run Tutorial", systemImage: "play.circle")
+                        }
                     }
                     
-                    Button {
-                        isImporting = true
-                    } label: {
-                        Label("Import CSV", systemImage: "square.and.arrow.down")
+                    Section("About") {
+                        HStack {
+                            Text("Finlytics")
+                                .fontWeight(.medium)
+                            Spacer()
+                            Text("v1.0")
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
-                
-                Section("Help") {
-                    Button {
-                        tutorialManager.startTutorial()
-                    } label: {
-                        Label("Run Tutorial", systemImage: "play.circle")
-                    }
-                }
-                
-                Section("About") {
-                    Text("Finlytics Local-First v1.0")
-                }
-            }
+                .scrollDismissesKeyboard(.interactively)
                 .onAppear {
-                    // Auto-scroll to top when tutorial is active
                     if tutorialManager.currentStep == .settingsSetup {
                         withAnimation {
                             proxy.scrollTo("settingsTop", anchor: .top)
@@ -137,8 +160,11 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .onAppear {
-                if let key = KeychainHelper.shared.read(for: "gemini_api_key") {
-                    apiKey = key
+                if let gKey = KeychainHelper.shared.read(for: "gemini_api_key") {
+                    geminiApiKey = gKey
+                }
+                if let oKey = KeychainHelper.shared.read(for: "openai_api_key") {
+                    openAIApiKey = oKey
                 }
             }
             .alert("Configuration Saved", isPresented: $isSaved) {
@@ -147,58 +173,14 @@ struct SettingsView: View {
             .alert("How to Get API Key", isPresented: $showAPIKeyHelp) {
                 Button("OK", role: .cancel) { }
             } message: {
-                Text("1. Go to aistudio.google.com\n2. Sign in with Google\n3. Click 'Get API Key'\n4. Copy and paste here")
-            }
-            .alert("Import Result", isPresented: $showImportAlert) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(importMessage)
-            }
-            .fileImporter(isPresented: $isImporting, allowedContentTypes: [.commaSeparatedText, .plainText]) { result in
-                switch result {
-                case .success(let url):
-                    importData(from: url)
-                case .failure(let error):
-                    importMessage = "Import failed: \(error.localizedDescription)"
-                    showImportAlert = true
+                if aiProvider == "gemini" {
+                    Text("1. Go to aistudio.google.com\n2. Sign in with Google\n3. Click 'Get API Key'\n4. Copy and paste here")
+                } else {
+                    Text("1. Go to platform.openai.com\n2. Sign in or create an account\n3. Go to API Keys\n4. Generate new secret key and paste here")
                 }
             }
         }
     }
-    
-    // Helpers
-    @MainActor
-    private func generateExportFile() -> URL {
-        let csv = CSVManager.shared.generateCSV(from: transactions)
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("Finlytics_Export_\(Date().formatted(date: .numeric, time: .omitted).replacingOccurrences(of: "/", with: "-")).csv")
-        try? csv.write(to: temp, atomically: true, encoding: .utf8)
-        return temp
-    }
-    
-    private func importData(from url: URL) {
-        guard url.startAccessingSecurityScopedResource() else {
-            importMessage = "Permission denied to access file."
-            showImportAlert = true
-            return
-        }
-        defer { url.stopAccessingSecurityScopedResource() }
-        
-        do {
-            let transactions = try CSVManager.shared.parseCSV(from: url)
-            var count = 0
-            for tx in transactions {
-                modelContext.insert(tx)
-                count += 1
-            }
-            importMessage = "Successfully imported \(count) transactions."
-            showImportAlert = true
-        } catch {
-            importMessage = "Error parsing CSV: \(error.localizedDescription)"
-            showImportAlert = true
-        }
-    }
-    
-
 }
 
 #Preview {

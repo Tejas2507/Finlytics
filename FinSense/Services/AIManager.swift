@@ -3,8 +3,8 @@ import SwiftData
 import GoogleGenerativeAI // User must add this package
 
 // Placeholder until package is added
-class GeminiService {
-    static let shared = GeminiService()
+class AIManager {
+    static let shared = AIManager()
     
     // Parsed result structure
     struct ParsedTransaction: Codable {
@@ -12,6 +12,38 @@ class GeminiService {
         let merchant: String?
         let category: String?
         let type: String? // "Income" or "Expense"
+    }
+    
+    // Unified Generation logic with AI Provider routing and Persona Injection
+    func generateContent(systemPrompt: String) async throws -> String {
+        let aiProvider = UserDefaults.standard.string(forKey: "aiProvider") ?? "gemini"
+        let persona = UserDefaults.standard.string(forKey: "userAIPersona") ?? ""
+        let personaInjection = persona.isEmpty ? "" : """
+        
+        
+        --- HIDDEN BEHAVIORAL DOSSIER (The user does NOT see this) ---
+        The following is a psychological profile of the user, generated from their spending patterns, onboarding answers, and chat history. Use it to deeply personalize your tone, advice, and approach.
+        
+        IMPORTANT RULES FOR USING THIS DOSSIER:
+        • Use it NATURALLY — let it inform your tone and advice, but don't reference it explicitly.
+        • Focus especially on 'Communication Guide' and 'Agent Instructions' for HOW to talk.
+        • Only mention specific dossier insights when directly relevant to the user's question.
+        • NEVER tell the user you have this profile. It should feel like you just "get" them.
+        
+        \(persona)
+        --- END DOSSIER ---
+        """
+        let finalPrompt = systemPrompt + personaInjection
+        
+        if aiProvider == "gemini" {
+            let apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
+            guard !apiKey.isEmpty else { throw NSError(domain: "AIManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "Gemini API Key missing"]) }
+            return try await generateContentWithFallback(apiKey: apiKey, systemPrompt: finalPrompt)
+        } else {
+            let apiKey = KeychainHelper.shared.read(for: "openai_api_key") ?? ""
+            guard !apiKey.isEmpty else { throw NSError(domain: "AIManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "OpenAI API Key missing"]) }
+            return try await OpenAIService.shared.generateContent(apiKey: apiKey, systemPrompt: finalPrompt)
+        }
     }
 
     // Helper to try selected model, then fallback to 2.5-flash if it fails
@@ -47,62 +79,80 @@ class GeminiService {
         }
     }
     
-    // Chat with Financial Agent
-    func generateResponse(for prompt: String, context: [Transaction], budgets: [Budget] = [], monthlySalary: Double = 0.0, apiKey: String) async throws -> String {
-        guard !apiKey.isEmpty else { return "Please set your Google Gemini API Key in Settings to chat." }
+    // Chat with Financial Agent — uses structured analytics + fuzzy TF-IDF fallback
+    func generateResponse(for prompt: String, context: [Transaction], budgets: [Budget] = [], monthlySalary: Double = 0.0) async throws -> String {
         
-        // Calculate Financial Context (spending excludes investments)
-        let totalIncome = context.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
-        let totalExpense = context.filter { $0.type == .expense && !$0.category.lowercased().contains("invest") }.reduce(0) { $0 + $1.amount }
-        let balance = totalIncome - totalExpense
+        // ── LAYER 1: Structured Analytics (pre-computed, accurate) ──
+        let richContext = MerchantAnalytics.shared.buildRichContext(
+            transactions: context,
+            userQuery: prompt
+        )
         
-        // Recent Transactions (Optimized Format for Token Efficiency)
-        // Format: Date|Merchant|Amt|Cat|Type
-        let recentTx = context.prefix(40).map {
-            "\($0.date.formatted(date: .numeric, time: .omitted))|\($0.merchant)|\($0.amount)|\($0.category)|\($0.type == .income ? "IN" : "EX")"
-        }.joined(separator: "\n")
+        // ── LAYER 2: Fuzzy TF-IDF fallback (catches typos, niche queries) ──
+        let keywords = extractKeywords(from: prompt)
+        var rankedTransactions: [(Transaction, Int)] = context.map { tx in
+            var score = 0
+            let searchableText = "\(tx.merchant) \(tx.category) \(tx.type)".lowercased()
+            for word in keywords {
+                if searchableText.contains(word) { score += 1 }
+            }
+            let daysAgo = Calendar.current.dateComponents([.day], from: tx.date, to: Date()).day ?? 0
+            if daysAgo < 30 { score += 1 }
+            return (tx, score)
+        }
+        rankedTransactions.sort {
+            if $0.1 == $1.1 { return $0.0.date > $1.0.date }
+            return $0.1 > $1.1
+        }
         
-        // Budget Context (current month only)
+        // Only include fuzzy-matched rows that actually scored > 0 (relevant), max 20
+        let fuzzyMatches = rankedTransactions.filter { $0.1 > 0 }.prefix(20).map { $0.0 }
+        let fuzzyTxStr = fuzzyMatches.isEmpty ? "" : """
+        
+        FUZZY-MATCHED TRANSACTIONS (backup for typos/edge cases):
+        \(fuzzyMatches.map { "\($0.date.formatted(date: .numeric, time: .omitted))|\($0.merchant)|₹\(Int($0.amount))|\($0.category)|\($0.type == .income ? "IN" : "EX")" }.joined(separator: "\n"))
+        """
+        
+        // ── Budget Context ──
         let calendar = Calendar.current
         let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: Date()))!
         let currentMonthTx = context.filter { $0.date >= startOfMonth }
-        
         let budgetContext = budgets.map { budget in
             let spent = currentMonthTx.filter { $0.category == budget.category && $0.type == .expense }.reduce(0) { $0 + $1.amount }
             let pct = budget.monthlyLimit > 0 ? Int((spent / budget.monthlyLimit) * 100) : 0
             return "\(budget.category): ₹\(Int(spent))/₹\(Int(budget.monthlyLimit)) (\(pct)%)"
         }.joined(separator: "; ")
         
-        let salaryContext = monthlySalary > 0 ? "Monthly Salary: \(monthlySalary)" : "Monthly Salary: Not set"
+        let salaryContext = monthlySalary > 0 ? "Monthly Salary: ₹\(Int(monthlySalary))" : "Monthly Salary: Not set"
         
+        // ── THE PROMPT ──
         let systemPrompt = """
-    You are Finlytics, a smart financial assistant for Indian users. ALL amounts are in Indian Rupees (₹ INR).
+    You are Finlytics — a sharp, friendly financial advisor for Indian users. All amounts in ₹ (INR).
     
-    ## Financial Context (All in ₹ INR)
-    - Total Balance: ₹\(Int(balance))
-    - Total Income: ₹\(Int(totalIncome))
-    - Total Expenses: ₹\(Int(totalExpense))
-    - \(salaryContext)
+    ## Pre-Computed Analytics (USE THESE NUMBERS — they are accurate)
+    \(richContext)
+    \(fuzzyTxStr)
     
     ## Budgets
     \(budgetContext.isEmpty ? "No active budgets." : budgetContext)
+    \(salaryContext)
     
-    ## Recent Transactions (Last 30)
-    \(recentTx)
+    ## User Question
+    \(prompt)
     
-    User Question: \(prompt)
-    
-    **Instructions:**
-    - Always respond with amounts in ₹ (Indian Rupees).
-    - Answer concisely and helpfully.
-    - **ALWAYS use Markdown tables** when presenting lists of numbers, comparisons, or expense breakdowns.
-    - Use **bold** for key figures and important takeaways.
-    - If suggesting cuts, look at the highest expense categories.
+    ## RESPONSE RULES (VERY IMPORTANT):
+    1. **BE CONCISE** — Answer in 3-5 bullet points. Max 120 words total. No fluff.
+    2. **USE PRE-COMPUTED DATA** — The analytics above are pre-calculated and accurate. Use those numbers directly instead of trying to count raw transactions. 
+    3. **POINTWISE FORMAT** — Use bullet points (•), not paragraphs. Each bullet = one clear insight.
+    4. **TABLES** — Only use a simple 2-column vertical table (Label | Value) when the user asks for a comparison. Never use wide multi-column tables. Keep tables under 6 rows.
+    5. **TONE** — Be a smart, witty financial friend. Not a corporate robot. Not a professor.
+    6. **₹ ALWAYS** — All amounts in ₹ with no decimal places.
+    7. **ADMIT GAPS** — If the data doesn't cover what the user asked, say so honestly. Don't hallucinate.
+    8. **NO HISTORY DUMPS** — Never list raw transactions unless the user explicitly asks "show me every transaction at X".
     """
         
-        
         do {
-            let text = try await generateContentWithFallback(apiKey: apiKey, systemPrompt: systemPrompt)
+            let text = try await generateContent(systemPrompt: systemPrompt)
             if text.isEmpty { return "I couldn't generate a response." }
             return text
         } catch {
@@ -115,9 +165,7 @@ class GeminiService {
     }
     
     // Smart Paste: Parse text into transaction details
-    func parseTransaction(from text: String, apiKey: String) async throws -> ParsedTransaction {
-        guard !apiKey.isEmpty else { throw NSError(domain: "GeminiService", code: 401, userInfo: [NSLocalizedDescriptionKey: "API Key missing"]) }
-        
+    func parseTransaction(from text: String) async throws -> ParsedTransaction {
         let prompt = """
         Extract the following transaction details from this text: "\(text)"
         
@@ -132,7 +180,7 @@ class GeminiService {
         """
         
         do {
-            let jsonString = try await generateContentWithFallback(apiKey: apiKey, systemPrompt: prompt)
+            let jsonString = try await generateContent(systemPrompt: prompt)
             
             // Clean markdown code blocks if present
             let cleanedJson = jsonString.replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "")
@@ -148,9 +196,7 @@ class GeminiService {
     
     // Smart Budgeting: Analyze history and suggest monthly budgets
     // Uses historical averages per actual calendar month
-    func generateBudgetSuggestions(history: [Transaction], apiKey: String) async throws -> String {
-        guard !apiKey.isEmpty else { return "" }
-        
+    func generateBudgetSuggestions(history: [Transaction]) async throws -> String {
         let calendar = Calendar.current
         let now = Date()
         let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
@@ -210,10 +256,13 @@ class GeminiService {
         \(spendingData.isEmpty ? "No expenses recorded yet - suggest starter budgets based on salary." : spendingData)
         
         INSTRUCTIONS:
-        1. Use the category breakdown to suggest realistic budgets
-        2. If salary is set: Ensure total budgets don't exceed 70-80% of salary
-        3. Suggest budgets for top 3 spending categories
-        4. Be reasonable - budget should allow some flexibility
+        1. Be REALISTIC, not aggressive. Suggest limits the user can actually stick to.
+        2. If a category average is reasonable for their income level, set the budget AT or slightly below the average — not 15% below.
+        3. Only suggest meaningful cuts on categories that are clearly inflated (e.g., Dining > 20% of income).
+        4. If salary is set: Aim for total budgets around 75-85% of salary (leaving 15-25% for savings). Adjust based on their actual behavior — don't force an unrealistic savings rate.
+        5. Suggest budgets for the top 3-5 spending categories.
+        6. If the user is already spending conservatively, ACKNOWLEDGE it and set budgets that protect their good habits rather than demanding more cuts.
+        7. Keep suggestions practical — don't tell someone spending ₹2,000/month on Food to cut to ₹1,200. That's unrealistic.
         
         OUTPUT: Return ONLY a raw JSON array (no markdown):
         [
@@ -221,13 +270,13 @@ class GeminiService {
                 "category": "String",
                 "suggestedLimit": Double,
                 "currentAverage": Double,
-                "reason": "Short reason"
+                "reason": "Short reason — be encouraging, not punishing"
             }
         ]
         """
         
         do {
-            let rawText = try await generateContentWithFallback(apiKey: apiKey, systemPrompt: prompt)
+            let rawText = try await generateContent(systemPrompt: prompt)
             let cleaned = rawText
                 .replacingOccurrences(of: "```json", with: "")
                 .replacingOccurrences(of: "```", with: "")
@@ -242,9 +291,7 @@ class GeminiService {
     }
     
     // Insight Generation (Legacy)
-    func generateInsight(context: [Transaction], promptTemplate: String, apiKey: String) async throws -> String {
-        guard !apiKey.isEmpty else { return "Please configure API Key." }
-        
+    func generateInsight(context: [Transaction], promptTemplate: String) async throws -> String {
         // Prepare context
         let recentTx = context.prefix(50).map {
             "\($0.date.formatted(date: .numeric, time: .omitted)): \($0.merchant) (\($0.amount))"
@@ -260,16 +307,22 @@ class GeminiService {
         """
         
         do {
-            return try await generateContentWithFallback(apiKey: apiKey, systemPrompt: fullPrompt)
+            return try await generateContent(systemPrompt: fullPrompt)
         } catch {
             return "Could not generate insight."
         }
     }
+    // MARK: - TF-IDF Helpers
+    private func extractKeywords(from text: String) -> [String] {
+        let stopWords: Set<String> = ["a", "an", "the", "and", "but", "or", "for", "nor", "on", "at", "to", "from", "by", "what", "is", "how", "much", "did", "i", "spend", "show", "me", "my", "transactions"]
+        let words = text.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty && !stopWords.contains($0) && $0.count > 2 }
+        return Array(Set(words)) // Unique keywords
+    }
     
     // MARK: - Smart Insight (Rich Context)
-    func generateSmartInsight(context: InsightEngine.FinancialContext, apiKey: String) async throws -> String {
-        guard !apiKey.isEmpty else { throw NSError(domain: "GeminiService", code: 401, userInfo: [NSLocalizedDescriptionKey: "API Key missing"]) }
-        
+    func generateSmartInsight(context: InsightEngine.FinancialContext) async throws -> String {
         // Pick a random angle to ensure variety
         let angles = [
             "daily_spending", "category_breakdown", "monthly_trend", 
@@ -327,7 +380,7 @@ class GeminiService {
         
         
         do {
-            let text = try await generateContentWithFallback(apiKey: apiKey, systemPrompt: prompt)
+            let text = try await generateContent(systemPrompt: prompt)
             
             // Clean up response
             let cleaned = text
@@ -350,8 +403,7 @@ class GeminiService {
     }
 
     // MARK: - General Financial Tip (Variety)
-    func generateGeneralTip(apiKey: String) async throws -> String {
-        guard !apiKey.isEmpty else { throw NSError(domain: "GeminiService", code: 401, userInfo: [NSLocalizedDescriptionKey: "API Key missing"]) }
+    func generateGeneralTip() async throws -> String {
         // Random seed to force variety
         let seed = Int.random(in: 1...1000)
         let topics = ["investing", "saving", "spending psychology", "financial freedom", "side hustles", "debt", "lifestyle inflation", "emergency funds", "automation"]
@@ -388,7 +440,7 @@ class GeminiService {
         """
         
         do {
-            let text = try await generateContentWithFallback(apiKey: apiKey, systemPrompt: prompt)
+            let text = try await generateContent(systemPrompt: prompt)
             
             let cleaned = text
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -420,9 +472,7 @@ class GeminiService {
         let vsLastMonth: Int // percentage change
     }
     
-    func generateMonthlyWrapped(stats: MonthlyStats, apiKey: String) async throws -> String {
-        guard !apiKey.isEmpty else { return "" }
-        
+    func generateMonthlyWrapped(stats: MonthlyStats) async throws -> String {
         let topCats = stats.topCategories.prefix(3).map { "\($0.name): ₹\(Int($0.amount))" }.joined(separator: ", ")
         let topMerchants = stats.topMerchants.prefix(3).map { "\($0.name) (₹\(Int($0.amount)), \($0.count) visits)" }.joined(separator: ", ")
         
@@ -454,7 +504,7 @@ class GeminiService {
         """
         
         do {
-            let text = try await generateContentWithFallback(apiKey: apiKey, systemPrompt: prompt)
+            let text = try await generateContent(systemPrompt: prompt)
             return text.trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: "\"", with: "")
                 .replacingOccurrences(of: "*", with: "")

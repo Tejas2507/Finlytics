@@ -85,12 +85,36 @@ struct ThisMonthSheet: View {
         return Int(((totalMonthlyExpense - averageMonthlyExpense) / averageMonthlyExpense) * 100)
     }
     
+    // Dynamic Outlier Detection
+    func computeDynamicOutlierThreshold(for txs: [Transaction]) -> Double {
+        let expenses = txs.filter { MonthlyStats.isSpending($0) }
+        guard expenses.count > 2 else { return 15000.0 }
+        
+        let mean = expenses.reduce(0) { $0 + $1.amount } / Double(expenses.count)
+        let variance = expenses.reduce(0) { $0 + pow($1.amount - mean, 2.0) } / Double(expenses.count)
+        let standardDeviation = sqrt(variance)
+        return max(5000.0, mean + (2 * standardDeviation))
+    }
+    
     // Stats
     var transactionCount: Int { currentMonthTransactions.count }
     var avgTransactionSize: Double { transactionCount > 0 ? totalMonthlyExpense / Double(monthlyExpenses.count) : 0 }
     var daysInMonth: Int { Calendar.current.range(of: .day, in: .month, for: Date())?.count ?? 30 }
     var currentDayOfMonth: Int { Calendar.current.component(.day, from: Date()) }
-    var projectedMonthEnd: Double { currentDayOfMonth > 0 ? (totalMonthlyExpense / Double(currentDayOfMonth)) * Double(daysInMonth) : 0 }
+    
+    var projectedMonthEnd: Double {
+        guard currentDayOfMonth > 0 else { return 0 }
+        let threshold = computeDynamicOutlierThreshold(for: transactions)
+        
+        let outliers = monthlyExpenses.filter { $0.amount > threshold }
+        let variables = monthlyExpenses.filter { $0.amount <= threshold }
+        
+        let outlierTotal = outliers.reduce(0) { $0 + $1.amount }
+        let variableTotal = variables.reduce(0) { $0 + $1.amount }
+        
+        let avgDailyVariable = variableTotal / Double(currentDayOfMonth)
+        return (avgDailyVariable * Double(daysInMonth)) + outlierTotal
+    }
     // Save Rate = (monthly salary - actual spent) / monthly salary
     var savingsRate: Double { monthlySalary > 0 ? ((monthlySalary - totalMonthlyExpense) / monthlySalary) * 100 : 0 }
     
@@ -270,10 +294,7 @@ struct ThisMonthSheet: View {
         isLoadingWrapped = true
         defer { isLoadingWrapped = false }
         
-        let apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
-        guard !apiKey.isEmpty else { return }
-        
-        let stats = GeminiService.MonthlyStats(
+        let stats = AIManager.MonthlyStats(
             monthName: currentMonthName,
             totalSpent: totalMonthlyExpense,
             totalEarned: totalMonthlyIncome,
@@ -286,7 +307,7 @@ struct ThisMonthSheet: View {
         )
         
         do {
-            wrappedText = try await GeminiService.shared.generateMonthlyWrapped(stats: stats, apiKey: apiKey)
+            wrappedText = try await AIManager.shared.generateMonthlyWrapped(stats: stats)
         } catch {
             wrappedText = "Couldn't generate your wrapped. Try again!"
         }
@@ -442,7 +463,13 @@ struct ThisMonthSheet: View {
                         )
                         .foregroundStyle(Color.cyan.gradient)
                         .cornerRadius(4)
+                        .annotation(position: .top, alignment: .center) {
+                            Text(item.amount.formatted(.number.notation(.compactName)))
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
                     }
+                    .chartYAxis(.hidden)
                     .frame(height: 140)
                 }
                 .contentShape(Rectangle())
@@ -462,7 +489,13 @@ struct ThisMonthSheet: View {
                             LinearGradient(colors: [.indigo, .purple.opacity(0.7)], startPoint: .top, endPoint: .bottom)
                         )
                         .cornerRadius(6)
+                        .annotation(position: .top, alignment: .center) {
+                            Text(item.amount.formatted(.number.notation(.compactName)))
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
                     }
+                    .chartYAxis(.hidden)
                     .frame(height: 140)
                     
                     // Overlay for gesture detection per bar
@@ -471,25 +504,15 @@ struct ThisMonthSheet: View {
                             Rectangle()
                                 .fill(Color.clear)
                                 .contentShape(Rectangle())
-                                .gesture(
-                                    LongPressGesture(minimumDuration: 0.2)
-                                        .onChanged { _ in
-                                            holdingWeek = week.week
-                                        }
-                                        .onEnded { _ in }
-                                )
-                                .simultaneousGesture(
-                                    DragGesture(minimumDistance: 0)
-                                        .onEnded { _ in
-                                            holdingWeek = nil
-                                        }
-                                )
+                                .onTapGesture {
+                                    holdingWeek = week.week
+                                }
                         }
                     }
                     .frame(height: 140)
                 }
                 
-                Text("Hold a bar to see daily breakdown")
+                Text("Tap a bar to see daily breakdown")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }

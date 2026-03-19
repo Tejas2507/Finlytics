@@ -10,6 +10,7 @@ struct DashboardView: View {
     @State private var apiKey: String = ""
     @State private var showThisMonth = false
     @State private var dailyInsight: Insight? = nil  // Direct state instead of @Query
+    @AppStorage("lastPersonaUpdate") private var lastPersonaUpdate: Double = 0.0
     
     // Current month's transactions
     var currentMonthTransactions: [Transaction] {
@@ -44,11 +45,18 @@ struct DashboardView: View {
     
     @State private var showBalanceEdit = false
     @AppStorage("startingBalance") private var startingBalance: Double = 0.0
+    @AppStorage("startingBalanceDate") private var startingBalanceDate: Double = 0.0 // Store as timestamp
     @State private var balanceInput: String = ""
     
-    // Transaction-based change (income - expenses from all transactions)
+    // Transaction-based change (income - expenses from transactions AFTER startingBalanceDate)
     var transactionChange: Double {
-        lifetimeIncome - lifetimeExpense
+        let referenceDate = startingBalanceDate > 0 ? Date(timeIntervalSince1970: startingBalanceDate) : Date.distantPast
+        let relevantTransactions = transactions.filter { $0.date >= referenceDate }
+        
+        let income = relevantTransactions.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+        let expense = relevantTransactions.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
+        
+        return income - expense
     }
     
     // Displayed balance = Starting balance + all transaction changes
@@ -87,6 +95,26 @@ struct DashboardView: View {
                 let insight = await InsightEngine.shared.fetchTodaysInsight(context: modelContext, transactions: transactions, apiKey: key)
                 dailyInsight = insight
                 print("DEBUG DASHBOARD: Set dailyInsight to: \(insight?.title ?? "nil")")
+                
+                // Triggers AI Behavioral Profiling in background once a week
+                let now = Date().timeIntervalSince1970
+                if now - lastPersonaUpdate > 7 * 86400 {
+                    AIPersonaEngine.shared.archiveCurrentPersona() // snapshot the old one first
+                    await AIPersonaEngine.shared.generatePersona(transactions: transactions)
+                    lastPersonaUpdate = now
+                }
+                
+                // 30-day fallback: summarize chat signals even if user chats infrequently
+                AIPersonaEngine.shared.summarizeIfStale()
+            }
+            // When the chat summarizer fires, immediately sync persona with the fresh signals
+            .onReceive(NotificationCenter.default.publisher(for: .chatSignalsUpdated)) { _ in
+                Task {
+                    print("🔄 chatSignalsUpdated received — refreshing persona immediately")
+                    AIPersonaEngine.shared.archiveCurrentPersona()
+                    await AIPersonaEngine.shared.generatePersona(transactions: transactions)
+                    lastPersonaUpdate = Date().timeIntervalSince1970
+                }
             }
             .sheet(isPresented: $showThisMonth) {
                 ThisMonthSheet(transactions: transactions)
@@ -128,6 +156,7 @@ struct DashboardView: View {
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Save") {
                                 startingBalance = Double(balanceInput) ?? 0
+                                startingBalanceDate = Date().timeIntervalSince1970 // Save current time
                                 showBalanceEdit = false
                                 tutorialManager.completeStep(.editBalance)
                             }
@@ -299,7 +328,7 @@ struct RecentTransactionsView: View {
     let transactions: [Transaction]
     
     var recentTransactions: [Transaction] {
-        transactions.sorted { $0.date > $1.date }.prefix(3).map { $0 }
+        transactions.filter { !$0.isHidden }.sorted { $0.date > $1.date }.prefix(3).map { $0 }
     }
     
     var body: some View {
@@ -333,23 +362,26 @@ struct SummaryCard: View {
                 Image(systemName: icon)
                     .foregroundColor(color)
                     .font(.title3)
+                    .symbolRenderingMode(.hierarchical)
                 Spacer()
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.caption)
+                    .font(.caption2)
+                    .fontWeight(.medium)
                     .foregroundColor(.secondary)
+                    .textCase(.uppercase)
                 Text("\(prefix)\(amount, format: .currency(code: "INR"))")
-                    .font(.system(.body, design: .rounded))
+                    .font(.system(.title3, design: .rounded))
                     .bold()
                     .minimumScaleFactor(0.8)
                     .lineLimit(1)
             }
         }
-        .padding()
+        .padding(16)
         .frame(maxWidth: .infinity)
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(12)
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }

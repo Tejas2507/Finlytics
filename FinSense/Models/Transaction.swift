@@ -15,8 +15,9 @@ class Transaction {
     var notes: String
     var type: TransactionType
     var category: String
+    var isHidden: Bool = false
     
-    init(amount: Double, date: Date = Date(), merchant: String, notes: String = "", type: TransactionType = .expense, category: String = "Uncategorized") {
+    init(amount: Double, date: Date = Date(), merchant: String, notes: String = "", type: TransactionType = .expense, category: String = "Uncategorized", isHidden: Bool = false) {
         self.id = UUID()
         self.amount = amount
         self.date = date
@@ -24,6 +25,7 @@ class Transaction {
         self.notes = notes
         self.type = type
         self.category = category
+        self.isHidden = isHidden
     }
     
     // Smart Parsing Logic

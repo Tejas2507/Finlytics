@@ -2,7 +2,6 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @AppStorage("appTheme") private var appTheme: String = "System"
     @StateObject private var tutorialManager = TutorialManager.shared
     @State private var showingAddSheet = false
     
@@ -40,7 +39,7 @@ struct ContentView: View {
                     }
             }
             .tint(Color.indigo)
-            .preferredColorScheme(theme)
+            .preferredColorScheme(.dark)
             .sheet(isPresented: $showingAddSheet) {
                 AddTransactionView()
             }
@@ -62,14 +61,6 @@ struct ContentView: View {
         }
         .onPreferenceChange(TutorialTargetKey.self) { rects in
             tutorialManager.spotlightRects = rects
-        }
-    }
-    
-    private var theme: ColorScheme? {
-        switch appTheme {
-        case "Light": return .light
-        case "Dark": return .dark
-        default: return nil
         }
     }
 }

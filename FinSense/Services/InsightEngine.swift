@@ -30,6 +30,20 @@ class InsightEngine {
         let biggestSpendingDay: (day: String, amount: Double)?
     }
     
+    // MARK: - Dynamic Outlier Detection
+    private func computeDynamicOutlierThreshold(for transactions: [Transaction]) -> Double {
+        let expenses = transactions.filter { MonthlyStats.isSpending($0) }
+        guard expenses.count > 2 else { return 15000.0 } // Default fallback if not enough data
+        
+        let mean = expenses.reduce(0) { $0 + $1.amount } / Double(expenses.count)
+        let variance = expenses.reduce(0) { $0 + pow($1.amount - mean, 2.0) } / Double(expenses.count)
+        let standardDeviation = sqrt(variance)
+        
+        // Outlier is anything more than mean + 2 standard deviations
+        // Floor it at 5000 so small standard deviations don't catch normal expenses
+        return max(5000.0, mean + (2 * standardDeviation))
+    }
+    
     // MARK: - Build Context from Transactions
     func buildContext(from transactions: [Transaction]) -> FinancialContext {
         let calendar = Calendar.current
@@ -46,6 +60,14 @@ class InsightEngine {
         let lastMonthTotal = lastMonthExpenses.reduce(0) { $0 + $1.amount }
         let incomeTotal = thisMonthIncome.reduce(0) { $0 + $1.amount }
         
+        // Dynamic Outlier Separation
+        let outlierThreshold = computeDynamicOutlierThreshold(for: transactions)
+        let thisMonthOutliers = thisMonthExpenses.filter { $0.amount > outlierThreshold }
+        let thisMonthVariables = thisMonthExpenses.filter { $0.amount <= outlierThreshold }
+        
+        let outlierTotal = thisMonthOutliers.reduce(0) { $0 + $1.amount }
+        let variableTotal = thisMonthVariables.reduce(0) { $0 + $1.amount }
+        
         // Top categories (1st and 2nd)
         let grouped = Dictionary(grouping: thisMonthExpenses) { $0.category }
         let sortedCategories = grouped.map { ($0.key, $0.value.reduce(0) { $0 + $1.amount }) }
@@ -56,12 +78,12 @@ class InsightEngine {
         let secondCat = sortedCategories.count > 1 ? sortedCategories[1] : nil
         let secondCatPercent = thisMonthTotal > 0 && secondCat != nil ? Int(secondCat!.1 / thisMonthTotal * 100) : 0
         
-        // Average daily spend
+        // Average daily spend (VARIABLE ONLY)
         let dayOfMonth = calendar.component(.day, from: now)
-        let avgDaily = dayOfMonth > 0 ? thisMonthTotal / Double(dayOfMonth) : 0
+        let avgDaily = dayOfMonth > 0 ? variableTotal / Double(dayOfMonth) : 0
         
-        // Highest single expense
-        let highest = thisMonthExpenses.max(by: { $0.amount < $1.amount })
+        // Highest single expense (VARIABLE ONLY - stop roasting rent!)
+        let highest = thisMonthVariables.max(by: { $0.amount < $1.amount })
         
         // Days since investment
         let investments = transactions.filter { $0.category.lowercased().contains("invest") && $0.type == .expense }
@@ -71,11 +93,11 @@ class InsightEngine {
         // Spending trend
         let trend = lastMonthTotal > 0 ? Int(((thisMonthTotal - lastMonthTotal) / lastMonthTotal) * 100) : 0
         
-        // Days left & projection
+        // Days left & projection (Projected Variables + Fixed Outliers)
         let range = calendar.range(of: .day, in: .month, for: now)
         let daysInMonth = range?.count ?? 30
         let daysLeft = daysInMonth - dayOfMonth
-        let projected = avgDaily * Double(daysInMonth)
+        let projected = (avgDaily * Double(daysInMonth)) + outlierTotal
         
         // NEW: Weekend vs Weekday spending
         let weekendExpenses = thisMonthExpenses.filter {
@@ -223,10 +245,10 @@ class InsightEngine {
             print("DEBUG: Calling Gemini API for \(isPersonalized ? "personalized" : "general") insight...")
             
             if isPersonalized {
-                message = try await GeminiService.shared.generateSmartInsight(context: financialContext, apiKey: apiKey)
+                message = try await AIManager.shared.generateSmartInsight(context: financialContext)
                 category = .optimization
             } else {
-                message = try await GeminiService.shared.generateGeneralTip(apiKey: apiKey)
+                message = try await AIManager.shared.generateGeneralTip()
                 category = .savingsTip
             }
             

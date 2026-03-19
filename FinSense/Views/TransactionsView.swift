@@ -16,9 +16,10 @@ struct TransactionsView: View {
     
     var filteredTransactions: [Transaction] {
         transactions.filter { tx in
+            let isVisible = !tx.isHidden  // Hidden transactions stay in data, just not shown here
             let matchesSearch = searchText.isEmpty || tx.merchant.localizedCaseInsensitiveContains(searchText) || tx.category.localizedCaseInsensitiveContains(searchText)
             let matchesCategory = selectedCategory == nil || tx.category == selectedCategory
-            return matchesSearch && matchesCategory
+            return isVisible && matchesSearch && matchesCategory
         }
     }
     
@@ -84,13 +85,25 @@ struct TransactionsView: View {
                             }
                             toggleSelection(transaction)
                         }
-                        .swipeActions {
+                        .swipeActions(edge: .trailing) {
                             if !isSelectionMode {
                                 Button(role: .destructive) {
                                     modelContext.delete(transaction)
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
+                            }
+                        }
+                        .swipeActions(edge: .leading) {
+                            if !isSelectionMode {
+                                Button {
+                                    withAnimation {
+                                        transaction.isHidden = true
+                                    }
+                                } label: {
+                                    Label("Hide", systemImage: "eye.slash.fill")
+                                }
+                                .tint(.purple)
                             }
                         }
                     }
@@ -171,27 +184,32 @@ struct TransactionRow: View {
     var body: some View {
         HStack {
             Image(systemName: Category.icon(for: transaction.category))
+                .font(.title3)
                 .foregroundColor(.white)
-                .frame(width: 40, height: 40)
-                .background(Category.color(for: transaction.category))
-                .clipShape(Circle())
+                .frame(width: 44, height: 44)
+                .background(Category.color(for: transaction.category).opacity(0.85))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             
-            VStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(transaction.merchant)
                     .font(.headline)
+                    .fontWeight(.semibold)
                 Text(transaction.date.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
             }
             
             Spacer()
             
             Text(transaction.amount, format: .currency(code: "INR"))
-                .font(.body)
+                .font(.system(.body, design: .rounded))
                 .bold()
                 .foregroundColor(transaction.type == .income ? .green : .primary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -208,12 +226,17 @@ struct FilterButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.footnote)
+                .font(.caption)
+                .fontWeight(isSelected ? .semibold : .regular)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(isSelected ? Color.indigo : Color.gray.opacity(0.1))
-                .foregroundColor(isSelected ? .white : .primary)
-                .cornerRadius(20)
+                .background(
+                    isSelected ?
+                    AnyShapeStyle(LinearGradient(colors: [.indigo, .purple], startPoint: .leading, endPoint: .trailing)) :
+                    AnyShapeStyle(Color(.systemGray5))
+                )
+                .foregroundColor(isSelected ? .white : .secondary)
+                .clipShape(Capsule())
         }
     }
 }
