@@ -53,20 +53,20 @@
 - **Smart Paste** — Copy SMS/text and let AI parse the transaction
 - **Edit & delete** with swipe actions
 - **Search & filter** by category, type, or date
-- **CSV import/export** for data portability
+- **Vault** — Hide sensitive transactions behind Face ID/passcode
 
 ### 🔐 Privacy First
 - **100% local storage** using SwiftData
 - **Keychain-secured** API key storage
 - **No cloud sync** — Your data never leaves your device
-- **No tracking, no analytics** — Just pure utility
+- **Deep Dark Mode** — Premium, battery-saving dark interface natively enforced
 
 ---
 
 ## 📱 Screenshots
 
 <p align="center">
-  <em>Coming soon! The app features a modern, dark-mode-friendly interface with vibrant gradients and smooth animations.</em>
+  <em>Coming soon! The app features a premium dark-mode interface with vibrant gradients, smooth animations, and glassmorphic elements.</em>
 </p>
 
 ---
@@ -168,16 +168,17 @@ Finlytics/
 │   ├── DashboardHeader.swift  # Balance & insight cards
 │   ├── TransactionsView.swift # Transaction list
 │   ├── AddTransactionView.swift # Add/edit transactions
+│   ├── HiddenTransactionsView.swift # Secure vault for hidden transactions
 │   ├── AIInsightsView.swift   # Chat interface
 │   ├── SmartBudgetView.swift  # Budget management
 │   ├── BudgetSuggestionView.swift # AI proposal review
 │   ├── SettingsView.swift     # App settings
-│   └── ContentView.swift      # Legacy/placeholder
+│   └── ContentView.swift      # Main navigation and app container
 ├── Services/
-│   ├── GeminiService.swift    # AI API integration
+│   ├── AIManager.swift        # AI API integration & response generation
 │   ├── InsightEngine.swift    # Daily insight generation
+│   ├── AIPersonaEngine.swift  # Internal agent persona profiling
 │   ├── KeychainHelper.swift   # Secure key storage
-│   ├── CSVManager.swift       # Import/export logic
 │   └── DataSeeder.swift       # Demo data generator
 └── Assets.xcassets/           # App icons & images
 ```
