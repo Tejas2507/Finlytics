@@ -38,6 +38,7 @@
 ### 🤖 AI Financial Assistant
 - **Natural language chat** — Ask anything about your finances
 - **Context-aware responses** using your transaction history
+- **Stealth Persona Engine** — AI privately learns your spending habits and adapts its personality without intruding
 - **Budget tracking integration** — AI knows your spending limits
 - **Markdown & table support** for rich, formatted responses
 - Powered by **Google Gemini 2.5 Flash/Pro**
@@ -53,20 +54,20 @@
 - **Smart Paste** — Copy SMS/text and let AI parse the transaction
 - **Edit & delete** with swipe actions
 - **Search & filter** by category, type, or date
-- **Vault** — Hide sensitive transactions behind Face ID/passcode
 
 ### 🔐 Privacy First
 - **100% local storage** using SwiftData
 - **Keychain-secured** API key storage
+- **Hidden Vault** for private transactions protected by biometrics/passcode
 - **No cloud sync** — Your data never leaves your device
-- **Deep Dark Mode** — Premium, battery-saving dark interface natively enforced
+- **No tracking, no analytics** — Just pure utility
 
 ---
 
 ## 📱 Screenshots
 
 <p align="center">
-  <em>Coming soon! The app features a premium dark-mode interface with vibrant gradients, smooth animations, and glassmorphic elements.</em>
+  <em>The app features a premium, forced dark-mode interface with vibrant gradients, glassmorphic UI elements, and smooth animations.</em>
 </p>
 
 ---
@@ -168,16 +169,14 @@ Finlytics/
 │   ├── DashboardHeader.swift  # Balance & insight cards
 │   ├── TransactionsView.swift # Transaction list
 │   ├── AddTransactionView.swift # Add/edit transactions
-│   ├── HiddenTransactionsView.swift # Secure vault for hidden transactions
 │   ├── AIInsightsView.swift   # Chat interface
 │   ├── SmartBudgetView.swift  # Budget management
 │   ├── BudgetSuggestionView.swift # AI proposal review
 │   ├── SettingsView.swift     # App settings
-│   └── ContentView.swift      # Main navigation and app container
+│   └── ContentView.swift      # Legacy/placeholder
 ├── Services/
-│   ├── AIManager.swift        # AI API integration & response generation
+│   ├── GeminiService.swift    # AI API integration
 │   ├── InsightEngine.swift    # Daily insight generation
-│   ├── AIPersonaEngine.swift  # Internal agent persona profiling
 │   ├── KeychainHelper.swift   # Secure key storage
 │   └── DataSeeder.swift       # Demo data generator
 └── Assets.xcassets/           # App icons & images
