@@ -184,32 +184,27 @@ struct TransactionRow: View {
     var body: some View {
         HStack {
             Image(systemName: Category.icon(for: transaction.category))
-                .font(.title3)
                 .foregroundColor(.white)
-                .frame(width: 44, height: 44)
-                .background(Category.color(for: transaction.category).opacity(0.85))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .frame(width: 40, height: 40)
+                .background(Category.color(for: transaction.category))
+                .clipShape(Circle())
             
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading) {
                 Text(transaction.merchant)
                     .font(.headline)
-                    .fontWeight(.semibold)
                 Text(transaction.date.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundColor(.secondary)
             }
             
             Spacer()
             
             Text(transaction.amount, format: .currency(code: "INR"))
-                .font(.system(.body, design: .rounded))
+                .font(.body)
                 .bold()
                 .foregroundColor(transaction.type == .income ? .green : .primary)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 14)
-        .background(Color(.systemGray6))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.vertical, 4)
     }
 }
 

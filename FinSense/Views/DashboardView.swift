@@ -362,26 +362,23 @@ struct SummaryCard: View {
                 Image(systemName: icon)
                     .foregroundColor(color)
                     .font(.title3)
-                    .symbolRenderingMode(.hierarchical)
                 Spacer()
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.caption2)
-                    .fontWeight(.medium)
+                    .font(.caption)
                     .foregroundColor(.secondary)
-                    .textCase(.uppercase)
                 Text("\(prefix)\(amount, format: .currency(code: "INR"))")
-                    .font(.system(.title3, design: .rounded))
+                    .font(.system(.body, design: .rounded))
                     .bold()
                     .minimumScaleFactor(0.8)
                     .lineLimit(1)
             }
         }
-        .padding(16)
+        .padding()
         .frame(maxWidth: .infinity)
-        .background(Color(.systemGray6))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(12)
     }
 }
