@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Platform-iOS%2017%2B%20%7C%20macOS%2014%2B-blue?style=for-the-badge&logo=apple" alt="Platform"/>
   <img src="https://img.shields.io/badge/Swift-5.9-orange?style=for-the-badge&logo=swift" alt="Swift"/>
   <img src="https://img.shields.io/badge/SwiftData-Powered-purple?style=for-the-badge" alt="SwiftData"/>
-  <img src="https://img.shields.io/badge/AI-Gemini%202.5-4285F4?style=for-the-badge&logo=google" alt="Gemini"/>
+  <img src="https://img.shields.io/badge/AI-Gemini%202.0%20Flash-4285F4?style=for-the-badge&logo=google" alt="Gemini"/>
 </p>
 
 <p align="center">
@@ -31,36 +31,37 @@
 ### 📊 Smart Dashboard
 - **Real-time balance tracking** with beautiful, animated summary cards
 - **6-month spending trends** with smooth area charts
-- **Monthly income vs expense flow** visualization
+- **Interactive Onboarding** — A guided tour that auto-scrolls to highlight core dashboard features
 - **Category breakdown** with interactive donut charts
 - **AI-powered daily insights** that are witty and actionable
 
-### 🤖 AI Financial Assistant
-- **Natural language chat** — Ask anything about your finances
-- **Context-aware responses** using your transaction history
-- **Stealth Persona Engine** — AI privately learns your spending habits and adapts its personality without intruding
-- **Budget tracking integration** — AI knows your spending limits
+### 📁 Projects & Vaults (New!)
+- **Event-Based Tracking** — Organize transactions into specific Projects like "Wedding", "Summer Trip", or "Home Renovation"
+- **Secure Vault** — Swipe left to "Hide" sensitive projects into a biometric-protected vault
+- **Project Detail Analytics** — Deep-dive searches, category breakdowns, and spending trends specific to each project
+
+### 🤖 AI Strategy Engine
+- **Financial Strategist (Main)** — Ask anything about your performance and spending trends via the main AI Chat
+- **App Expert (Help Mode)** — A dedicated AI in Settings that knows the app manual inside out, providing step-by-step guidance without seeing your financial data
+- **Isolated Context Architecture** — Strategic isolation between your private data and app help to ensure maximum privacy
 - **Markdown & table support** for rich, formatted responses
-- Powered by **Google Gemini 2.5 Flash/Pro**
 
 ### 💰 Smart Budget Management
 - **AI-generated budget suggestions** based on spending patterns
 - **Visual progress bars** with color-coded status (green/orange/red)
-- **Category-wise tracking** with icons and colors
 - **Collaborative review** — Accept, modify, or reject AI proposals
 
-### 📝 Transaction Management
-- **Manual entry** with categorization
-- **Smart Paste** — Copy SMS/text and let AI parse the transaction
-- **Edit & delete** with swipe actions
-- **Search & filter** by category, type, or date
+### 📝 Transaction Intelligence
+- **Smart Paste (AI-Powered)** — Copy SMS/text and let AI parse the transaction automatically
+- **Merchant Auto-naming** — AI intelligently cleans up merchant names and suggests relevant categories
+- **Precise Timestamps** — Record and edit transactions with granular hour/minute detail
+- **Search & filter** by category, merchant, or date across all tabs
 
 ### 🔐 Privacy First
 - **100% local storage** using SwiftData
 - **Keychain-secured** API key storage
 - **Hidden Vault** for private transactions protected by biometrics/passcode
 - **No cloud sync** — Your data never leaves your device
-- **No tracking, no analytics** — Just pure utility
 
 ---
 
@@ -116,39 +117,27 @@
 
 5. **Configure API Key**
    - Go to Settings in the app
-   - Enter your Gemini API key
-   - Get one free at [aistudio.google.com](https://aistudio.google.com)
+   - Enter your Gemini API key from [aistudio.google.com](https://aistudio.google.com)
 
 ---
 
 ## 🚀 Usage
 
-### Adding Transactions
+### Organizing with Projects
+1. Go to the **Projects** tab.
+2. Tap **+** to create a project (e.g., "Paris Trip").
+3. Link transactions directly from the "Add Transaction" screen or by swiping on existing transactions.
+4. **Hide** sensitive projects by swiping left and selecting "Hide" to move them into the Vault.
 
-#### Manual Entry
-1. Tap the **+** button on the Transactions tab
-2. Select Income or Expense
-3. Enter amount, merchant, category
-4. Save!
+### Dual-AI Interaction
+- **Tab 5 (AI Chat)**: Talk to the Financial Strategist about your wealth.
+- **Settings > App Help**: Ask the App Expert how to use specific features or locate the Vault.
 
-#### Smart Paste (AI-Powered)
-1. Copy a bank SMS or transaction text
-2. Open Add Transaction
-3. Tap **"Read from Clipboard (Smart Paste)"**
-4. AI will parse and auto-fill the fields
-
-### Getting AI Insights
-- Navigate to the **AI Chat** tab
-- Ask questions like:
-  - *"How much did I spend on food this month?"*
-  - *"Am I overspending compared to last month?"*
-  - *"Give me a breakdown of my expenses"*
-
-### Setting Budgets
-- Go to **Smart Budget** tab
-- Tap **"Generate AI Budgets"** for smart suggestions
-- Or tap **+** to add manual budgets
-- Track progress with visual indicators
+### Smart Paste (AI-Powered)
+1. Copy a bank SMS or transaction text.
+2. Open Add Transaction.
+3. Tap **"Read from Clipboard (Smart Paste)"**.
+4. AI will parse and auto-fill the fields, including merchant and category suggestions.
 
 ---
 
@@ -158,27 +147,29 @@
 Finlytics/
 ├── FinSenseApp.swift          # App entry point
 ├── Models/
-│   ├── Transaction.swift      # Transaction model with Smart Parse
-│   ├── Budget.swift           # Budget model
+│   ├── Transaction.swift      # Transaction model with Intelligent Parsing
+│   ├── Project.swift          # (New) Project & Vault model
 │   ├── Category.swift         # Category definitions & colors
+│   ├── Budget.swift           # Budget model
 │   └── Insight.swift          # Daily insight model
 ├── Views/
-│   ├── RootView.swift         # Tab navigation
-│   ├── SplashView.swift       # Launch animation
-│   ├── DashboardView.swift    # Main dashboard with charts
-│   ├── DashboardHeader.swift  # Balance & insight cards
-│   ├── TransactionsView.swift # Transaction list
-│   ├── AddTransactionView.swift # Add/edit transactions
-│   ├── AIInsightsView.swift   # Chat interface
+│   ├── DashboardView.swift    # Main dashboard with auto-scrolling tutorial
+│   ├── ProjectsListView.swift # (New) Grouped projects and Vault access
+│   ├── ProjectDetailView.swift # (New) Detailed project analytics
+│   ├── TransactionsView.swift # Transaction list with full search
+│   ├── AddTransactionView.swift # Transaction editor with Time support
+│   ├── AIInsightsView.swift   # Financial strategist chat
 │   ├── SmartBudgetView.swift  # Budget management
-│   ├── BudgetSuggestionView.swift # AI proposal review
-│   ├── SettingsView.swift     # App settings
-│   └── ContentView.swift      # Legacy/placeholder
+│   ├── SettingsView.swift     # App settings & Help Expert access
+│   ├── HiddenTransactionsView.swift # The Secure Vault
+│   └── TutorialOverlay.swift  # Interactive onboarding UI
 ├── Services/
-│   ├── GeminiService.swift    # AI API integration
-│   ├── InsightEngine.swift    # Daily insight generation
+│   ├── AIManager.swift        # Primary AI logic with Persona & Help modes
+│   ├── AIPersonaEngine.swift  # Financial Analyst behavior engine
+│   ├── MerchantAnalytics.swift# Intelligent merchant naming logic
+│   ├── InsightEngine.swift    # Daily financial insight generation
 │   ├── KeychainHelper.swift   # Secure key storage
-│   └── DataSeeder.swift       # Demo data generator
+│   └── TutorialManager.swift  # Multi-step Onboarding logic
 └── Assets.xcassets/           # App icons & images
 ```
 
@@ -189,60 +180,38 @@ Finlytics/
 Finlytics follows these principles:
 
 1. **Local-First** — Your financial data is sensitive. It stays on your device.
-2. **AI-Augmented** — AI enhances, not replaces, your financial decisions.
-3. **Delightful UX** — Smooth animations, intuitive gestures, beautiful charts.
-4. **Indian Context** — Built with ₹ INR as the primary currency, SMS parsing for Indian banks.
+2. **Context Isolation** — Strategic separation of business and support AI to prevent data leaks.
+3. **Delightful UX** — Premium dark-mode aesthetics with intentional animations.
+4. **Smart Automation** — Reducing transaction friction via Smart Paste and Merchant intelligence.
 
 ---
 
 ## 🔑 API Key Setup
 
 1. Visit [Google AI Studio](https://aistudio.google.com)
-2. Sign in with your Google account
-3. Click **"Get API Key"**
-4. Copy the key
-5. In Finlytics, go to **Settings > AI Configuration**
-6. Paste and save
-
-> **Note:** Your API key is stored securely in the iOS/macOS Keychain and never transmitted anywhere except to Google's API.
+2. Sign in and click **"Get API Key"**
+3. In Finlytics, go to **Settings > AI Configuration**
+4. Paste and save
 
 ---
 
 ## 🗺 Roadmap
 
+- [x] Projects & Vaults functionality
+- [x] Dual-Mode AI (Strategy vs Help)
+- [x] AI-Powered SMS Parsing (Smart Paste)
+- [x] Transaction Time-editing support
 - [ ] Widget support for quick balance view
 - [ ] Recurring transactions
-- [ ] Bill reminders
-- [ ] Multi-currency support
 - [ ] iCloud sync (opt-in)
 - [ ] Siri shortcuts integration
 - [ ] Apple Watch companion app
 
 ---
 
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
 ## 📄 License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- [Google Generative AI](https://ai.google.dev/) for the powerful Gemini API
-- [Swift Charts](https://developer.apple.com/documentation/charts) for beautiful visualizations
-- The SwiftUI community for inspiration
 
 ---
 
