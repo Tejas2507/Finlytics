@@ -38,6 +38,14 @@ class MerchantAnalytics {
         let topCategory: String
     }
     
+    struct ProjectStats {
+        let name: String
+        let totalSpent: Double
+        let transactionCount: Int
+        let topCategory: String
+        let budget: Double
+    }
+    
     // MARK: - Compute Analytics
     
     func computeMerchantStats(from transactions: [Transaction]) -> [MerchantStats] {
@@ -248,5 +256,33 @@ class MerchantAnalytics {
         sections.append("LAST 3 MONTHS:\n\(recentMonths)")
         
         return sections.joined(separator: "\n\n")
+    }
+    
+    // MARK: - Project Analytics for AI Context
+    
+    func computeProjectStats(from transactions: [Transaction], projects: [Project]) -> [ProjectStats] {
+        return projects.filter({ !$0.isArchived }).map { project in
+            let txns = transactions.filter { $0.projectNames.contains(project.name) && $0.type == .expense }
+            let total = txns.reduce(0) { $0 + $1.amount }
+            let topCat = Dictionary(grouping: txns) { $0.category }
+                .max(by: { $0.value.reduce(0) { $0 + $1.amount } < $1.value.reduce(0) { $0 + $1.amount } })?.key ?? "None"
+            return ProjectStats(name: project.name, totalSpent: total, transactionCount: txns.count, topCategory: topCat, budget: project.targetBudget)
+        }.sorted { $0.totalSpent > $1.totalSpent }
+    }
+    
+    func buildProjectContext(transactions: [Transaction], projects: [Project]) -> String {
+        let stats = computeProjectStats(from: transactions, projects: projects)
+        guard !stats.isEmpty else { return "" }
+        
+        let lines = stats.map { s in
+            var line = "\(s.name): ₹\(Int(s.totalSpent)) (\(s.transactionCount) txns, top: \(s.topCategory))"
+            if s.budget > 0 {
+                let pct = Int(min(s.totalSpent / s.budget, 1.0) * 100)
+                line += " [Budget: ₹\(Int(s.budget)), \(pct)% used]"
+            }
+            return line
+        }.joined(separator: "\n")
+        
+        return "\n\nPROJECTS (Spending Trackers):\n\(lines)"
     }
 }

@@ -7,6 +7,7 @@ struct FinSenseApp: App {
         let schema = Schema([
             Transaction.self,
             Budget.self,
+            Project.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

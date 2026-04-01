@@ -5,6 +5,7 @@ struct TransactionsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var tutorialManager: TutorialManager
     @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
+    @Query(sort: \Project.dateCreated, order: .reverse) private var projects: [Project]
     
     @State private var searchText = ""
     @State private var selectedCategory: String?
@@ -13,6 +14,7 @@ struct TransactionsView: View {
     
     // Bulk Selection State
     @State private var selection = Set<Transaction>()
+    @State private var projectTagTransaction: Transaction? = nil
     
     var filteredTransactions: [Transaction] {
         transactions.filter { tx in
@@ -104,6 +106,13 @@ struct TransactionsView: View {
                                     Label("Hide", systemImage: "eye.slash.fill")
                                 }
                                 .tint(.purple)
+                                
+                                Button {
+                                    projectTagTransaction = transaction
+                                } label: {
+                                    Label("Project", systemImage: "flag.fill")
+                                }
+                                .tint(.indigo)
                             }
                         }
                     }
@@ -141,15 +150,22 @@ struct TransactionsView: View {
                 }
             }
             .sheet(isPresented: $showingAddSheet) {
-                AddTransactionView()
+                NavigationView {
+                    AddTransactionView()
+                }
             }
             .sheet(item: $editingTransaction) { transaction in
-                AddTransactionView(existingTransaction: transaction)
+                NavigationView {
+                    AddTransactionView(existingTransaction: transaction)
+                }
             }
             .onChange(of: transactions.count) { oldCount, newCount in
                 if newCount > oldCount {
                     tutorialManager.completeStep(.addTransaction)
                 }
+            }
+            .sheet(item: $projectTagTransaction) { tx in
+                ProjectTagSheet(transaction: tx, projects: projects.filter { !$0.isArchived && !$0.isHidden })
             }
         }
     }
@@ -180,6 +196,12 @@ struct TransactionsView: View {
 
 struct TransactionRow: View {
     let transaction: Transaction
+    @Query private var allProjects: [Project]
+    
+    // Dictionary mapping project name to emoji
+    private var emojiCache: [String: String] {
+        return Dictionary(uniqueKeysWithValues: allProjects.map { ($0.name, $0.emoji) })
+    }
     
     var body: some View {
         HStack {
@@ -189,12 +211,36 @@ struct TransactionRow: View {
                 .background(Category.color(for: transaction.category))
                 .clipShape(Circle())
             
-            VStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(transaction.merchant)
                     .font(.headline)
-                Text(transaction.date.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                
+                HStack(spacing: 4) {
+                    Text(transaction.date.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    if !transaction.projectNames.isEmpty {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        let uniqueProjects = Array(Set(transaction.projectNames))
+                        let visibleProjects = uniqueProjects.prefix(3)
+                        
+                        HStack(spacing: 2) {
+                            ForEach(visibleProjects, id: \.self) { name in
+                                Text(emojiCache[name] ?? "🎯")
+                                    .font(.caption2)
+                            }
+                            if uniqueProjects.count > 3 {
+                                Text("...")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
             }
             
             Spacer()
@@ -232,6 +278,66 @@ struct FilterButton: View {
                 )
                 .foregroundColor(isSelected ? .white : .secondary)
                 .clipShape(Capsule())
+        }
+    }
+}
+
+// MARK: - Project Tag Sheet (Multi-Select)
+struct ProjectTagSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let transaction: Transaction
+    let projects: [Project]
+    @State private var searchText = ""
+    
+    var filteredProjects: [Project] {
+        if searchText.isEmpty { return projects }
+        return projects.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+    
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(filteredProjects) { project in
+                    Button {
+                        if transaction.projectNames.contains(project.name) {
+                            transaction.projectNames.removeAll { $0 == project.name }
+                        } else {
+                            transaction.projectNames.append(project.name)
+                        }
+                    } label: {
+                        HStack {
+                            Text(project.emoji)
+                            Text(project.name)
+                                .foregroundColor(.primary)
+                            Spacer()
+                            if transaction.projectNames.contains(project.name) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.indigo)
+                            } else {
+                                Image(systemName: "circle")
+                                    .foregroundColor(.secondary.opacity(0.4))
+                            }
+                        }
+                    }
+                }
+                
+                if !transaction.projectNames.isEmpty {
+                    Button(role: .destructive) {
+                        transaction.projectNames.removeAll()
+                        dismiss()
+                    } label: {
+                        Label("Remove All Tags", systemImage: "xmark.circle")
+                    }
+                }
+            }
+            .searchable(text: $searchText, prompt: "Search Projects")
+            .navigationTitle("Tag to Project")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ struct HiddenTransactionsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Transaction.date, order: .reverse) private var allTransactions: [Transaction]
+    @Query(sort: \Project.dateCreated, order: .reverse) private var allProjects: [Project]
     
     @State private var isAuthenticated = false
     @State private var authError: String?
@@ -13,6 +14,10 @@ struct HiddenTransactionsView: View {
     
     var hiddenTransactions: [Transaction] {
         allTransactions.filter { $0.isHidden }
+    }
+    
+    var hiddenProjects: [Project] {
+        allProjects.filter { $0.isHidden }
     }
     
     var body: some View {
@@ -87,57 +92,101 @@ struct HiddenTransactionsView: View {
     // MARK: - Authenticated Content
     private var authenticatedView: some View {
         Group {
-            if hiddenTransactions.isEmpty {
+            if hiddenTransactions.isEmpty && hiddenProjects.isEmpty {
                 VStack(spacing: 16) {
                     Spacer()
                     Image(systemName: "eye.slash")
                         .font(.system(size: 48))
                         .foregroundColor(.secondary.opacity(0.5))
-                    Text("No hidden transactions")
+                    Text("No hidden items")
                         .font(.headline)
                         .foregroundColor(.secondary)
-                    Text("Swipe right on any transaction to hide it")
+                    Text("Swipe right on transactions or projects to hide them")
                         .font(.subheadline)
                         .foregroundColor(.secondary.opacity(0.7))
                     Spacer()
                 }
             } else {
                 List {
-                    Section(footer: Text("Swipe left to unhide a transaction. Hidden items are still included in all calculations and analytics.")) {
-                        ForEach(hiddenTransactions) { transaction in
-                            HStack {
-                                Image(systemName: Category.icon(for: transaction.category))
-                                    .foregroundColor(.white)
-                                    .frame(width: 36, height: 36)
-                                    .background(Category.color(for: transaction.category))
-                                    .clipShape(Circle())
-                                
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(transaction.merchant)
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                    Text(transaction.date.formatted(date: .abbreviated, time: .omitted))
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                                
-                                Spacer()
-                                
-                                Text(transaction.amount, format: .currency(code: "INR"))
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(transaction.type == .income ? .green : .primary)
-                            }
-                            .padding(.vertical, 2)
-                            .swipeActions(edge: .trailing) {
-                                Button {
-                                    withAnimation {
-                                        transaction.isHidden = false
+                    // Hidden Projects
+                    if !hiddenProjects.isEmpty {
+                        Section(header: Text("Hidden Projects"), footer: Text("Swipe to unhide. Transactions inside a hidden project remain visible.")) {
+                            ForEach(hiddenProjects) { project in
+                                HStack(spacing: 12) {
+                                    Text(project.emoji)
+                                        .font(.title2)
+                                        .frame(width: 36, height: 36)
+                                        .background(Color(.systemGray5))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(project.name)
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        Text(project.dateCreated.formatted(date: .abbreviated, time: .omitted))
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
                                     }
-                                } label: {
-                                    Label("Unhide", systemImage: "eye.fill")
+                                    
+                                    Spacer()
+                                    
+                                    if project.targetBudget > 0 {
+                                        Text(project.targetBudget, format: .currency(code: "INR"))
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
                                 }
-                                .tint(.green)
+                                .padding(.vertical, 2)
+                                .swipeActions(edge: .trailing) {
+                                    Button {
+                                        withAnimation { project.isHidden = false }
+                                    } label: {
+                                        Label("Unhide", systemImage: "eye.fill")
+                                    }
+                                    .tint(.green)
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Hidden Transactions
+                    if !hiddenTransactions.isEmpty {
+                        Section(footer: Text("Swipe left to unhide a transaction. Hidden items are still included in all calculations and analytics.")) {
+                            ForEach(hiddenTransactions) { transaction in
+                                HStack {
+                                    Image(systemName: Category.icon(for: transaction.category))
+                                        .foregroundColor(.white)
+                                        .frame(width: 36, height: 36)
+                                        .background(Category.color(for: transaction.category))
+                                        .clipShape(Circle())
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(transaction.merchant)
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        Text(transaction.date.formatted(date: .abbreviated, time: .omitted))
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Text(transaction.amount, format: .currency(code: "INR"))
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(transaction.type == .income ? .green : .primary)
+                                }
+                                .padding(.vertical, 2)
+                                .swipeActions(edge: .trailing) {
+                                    Button {
+                                        withAnimation {
+                                            transaction.isHidden = false
+                                        }
+                                    } label: {
+                                        Label("Unhide", systemImage: "eye.fill")
+                                    }
+                                    .tint(.green)
+                                }
                             }
                         }
                     }

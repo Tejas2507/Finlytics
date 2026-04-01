@@ -14,6 +14,52 @@ class AIManager {
         let type: String? // "Income" or "Expense"
     }
     
+
+    
+    // MARK: - App Manual (Hidden Context for AI)
+    private var appManual: String {
+        """
+        # Finlytics App Official Manual (User Guide)
+        
+        ## 1. DASHBOARD (Tab 1)
+        - **Balance Card**: Displays your current "Net Savings". Tap it to set your 'Starting Balance'. All transactions are calculated relative to this point.
+        - **Spending Trends**: Charts showing your expense history.
+        - **Projects Summary**: Quick access to your top active projects.
+        - **This Month Sheet**: Accessible via the "This Month" button or by tapping the weekly bars. Contains deeper analytics and historical month navigation.
+        
+        ## 2. TRANSACTIONS (Tab 2)
+        - **Add Transaction (+)**:
+            - *Manual*: Fill in Title, Amount, Category, Date, and **Time**.
+            - *Smart Paste*: Type like you talk. Example: "Spent 50 on coffee" or "Income 10000 salary".
+        - **Editing**: Tap any transaction to change details. You can now edit the **exact time** of a transaction.
+        - **Bulk Actions**: Use 'Select' mode to change categories or 'Hide' multiple items at once.
+        - **Search**: Pull down on the list to filter by merchant or category.
+        
+        ## 3. PROJECTS (The 'Project' Section)
+        - **Purpose**: Group transactions for specific events (e.g., 'Goa Trip', 'Wedding').
+        - **Creation**: Accessible from Dashboard or Transactions. Set an Emoji and a Target Budget.
+        - **Vault (Secure Storage)**: 
+            - Swipe LEFT on any project card in the 'See All' list to find the 'Hide' option.
+            - Hidden projects move to the **Vault** (located in Settings).
+        - **Archiving**: Long-press or use Edit to Archive completed projects.
+        
+        ## 4. SMART BUDGETS (Tab 4)
+        - **Setup**: Create a budget for any category (Food, Travel, etc.).
+        - **Monitoring**: The app shows a progress bar indicating how much of your monthly limit is used.
+        - **AI Suggestion**: Tap the 'Suggest' button to let AI propose realistic limits based on your past spending.
+        
+        ## 5. AI CHATS (Bifurcated Context)
+        - **Financial Strategist (Main Tab)**: Analyzes numbers, spending patterns, and gives advice. Does NOT know app steps.
+        - **App Help Guide (Settings)**: Knows THIS manual and guides you on how to use features. Does NOT see your money data.
+        
+        ## 6. SETTINGS (Tab 5)
+        - **Monthly Income**: Set your salary here for better budgeting.
+        - **Vault**: View your hidden (private) projects and transactions here. Access with device bio/passcode.
+        - **AI Config**: Switch between Gemini/OpenAI models and manage API keys.
+        - **Tutorial**: Tap 'Replay Tutorial' to see the onboarding again.
+        """
+    }
+    
     // Unified Generation logic with AI Provider routing and Persona Injection
     func generateContent(systemPrompt: String) async throws -> String {
         let aiProvider = UserDefaults.standard.string(forKey: "aiProvider") ?? "gemini"
@@ -80,38 +126,50 @@ class AIManager {
     }
     
     // Chat with Financial Agent — uses structured analytics + fuzzy TF-IDF fallback
-    func generateResponse(for prompt: String, context: [Transaction], budgets: [Budget] = [], monthlySalary: Double = 0.0) async throws -> String {
+    func generateResponse(for prompt: String, context: [Transaction], budgets: [Budget], monthlySalary: Double, isHelpMode: Bool = false) async throws -> String {
+        let apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
+        if apiKey.isEmpty { return "Please set your Gemini API Key in Settings to use the AI assistant." }
         
-        // ── LAYER 1: Structured Analytics (pre-computed, accurate) ──
+        let model = GenerativeModel(name: "gemini-1.5-flash", apiKey: apiKey)
+        
+        if isHelpMode {
+            // ── HELP MODE: Strictly App Support ──
+            // NO financial context (transactions, budgets, salary) is included here.
+            let systemPrompt = """
+            You are Finlytics App Guide — a precise, helpful expert on the Finlytics iOS app.
+            
+            ## MISSION:
+            Assist the user with step-by-step instructions on HOW TO USE the app's features.
+            
+            ## CONTEXT (The App Manual):
+            \(appManual)
+            
+            ## RULES (STRICT):
+            1. Be VERY precise and concise.
+            2. ONLY answer questions about app functionality.
+            3. If the user asks about their financial data (spending, budgets, etc.), politely inform them: "I don't have access to your personal financial data in Help Mode. Please ask your Financial Strategist in the main Chat for spending insights."
+            4. Use bullet points for steps.
+            5. If a feature isn't in the manual, say you're not sure but can guide them through the basics.
+            
+            ## USER QUESTION:
+            \(prompt)
+            """
+            
+            do {
+                let response = try await model.generateContent(systemPrompt)
+                return response.text ?? "I couldn't generate a help response. Please try again."
+            } catch {
+                throw error
+            }
+        }
+        
+        // ── ANALYSIS MODE: Full Financial AI ──
         let richContext = MerchantAnalytics.shared.buildRichContext(
             transactions: context,
             userQuery: prompt
         )
         
-        // ── LAYER 2: Fuzzy TF-IDF fallback (catches typos, niche queries) ──
-        let keywords = extractKeywords(from: prompt)
-        var rankedTransactions: [(Transaction, Int)] = context.map { tx in
-            var score = 0
-            let searchableText = "\(tx.merchant) \(tx.category) \(tx.type)".lowercased()
-            for word in keywords {
-                if searchableText.contains(word) { score += 1 }
-            }
-            let daysAgo = Calendar.current.dateComponents([.day], from: tx.date, to: Date()).day ?? 0
-            if daysAgo < 30 { score += 1 }
-            return (tx, score)
-        }
-        rankedTransactions.sort {
-            if $0.1 == $1.1 { return $0.0.date > $1.0.date }
-            return $0.1 > $1.1
-        }
-        
-        // Only include fuzzy-matched rows that actually scored > 0 (relevant), max 20
-        let fuzzyMatches = rankedTransactions.filter { $0.1 > 0 }.prefix(20).map { $0.0 }
-        let fuzzyTxStr = fuzzyMatches.isEmpty ? "" : """
-        
-        FUZZY-MATCHED TRANSACTIONS (backup for typos/edge cases):
-        \(fuzzyMatches.map { "\($0.date.formatted(date: .numeric, time: .omitted))|\($0.merchant)|₹\(Int($0.amount))|\($0.category)|\($0.type == .income ? "IN" : "EX")" }.joined(separator: "\n"))
-        """
+        let fuzzyTxStr = getRelevantContext(from: context, for: prompt)
         
         // ── Budget Context ──
         let calendar = Calendar.current
@@ -125,41 +183,37 @@ class AIManager {
         
         let salaryContext = monthlySalary > 0 ? "Monthly Salary: ₹\(Int(monthlySalary))" : "Monthly Salary: Not set"
         
-        // ── THE PROMPT ──
         let systemPrompt = """
-    You are Finlytics — a sharp, friendly financial advisor for Indian users. All amounts in ₹ (INR).
-    
-    ## Pre-Computed Analytics (USE THESE NUMBERS — they are accurate)
-    \(richContext)
-    \(fuzzyTxStr)
-    
-    ## Budgets
-    \(budgetContext.isEmpty ? "No active budgets." : budgetContext)
-    \(salaryContext)
-    
-    ## User Question
-    \(prompt)
-    
-    ## RESPONSE RULES (VERY IMPORTANT):
-    1. **BE CONCISE** — Answer in 3-5 bullet points. Max 120 words total. No fluff.
-    2. **USE PRE-COMPUTED DATA** — The analytics above are pre-calculated and accurate. Use those numbers directly instead of trying to count raw transactions. 
-    3. **POINTWISE FORMAT** — Use bullet points (•), not paragraphs. Each bullet = one clear insight.
-    4. **TABLES** — Only use a simple 2-column vertical table (Label | Value) when the user asks for a comparison. Never use wide multi-column tables. Keep tables under 6 rows.
-    5. **TONE** — Be a smart, witty financial friend. Not a corporate robot. Not a professor.
-    6. **₹ ALWAYS** — All amounts in ₹ with no decimal places.
-    7. **ADMIT GAPS** — If the data doesn't cover what the user asked, say so honestly. Don't hallucinate.
-    8. **NO HISTORY DUMPS** — Never list raw transactions unless the user explicitly asks "show me every transaction at X".
-    """
+        You are Finlytics — a sharp, friendly financial advisor for Indian users. All amounts in ₹ (INR).
+        
+        ## Pre-Computed Analytics (USE THESE NUMBERS — they are accurate)
+        \(richContext)
+        
+        ## Budget Status
+        \(budgetContext.isEmpty ? "No active budgets." : budgetContext)
+        \(salaryContext)
+        
+        ## Relevant Transactions (Matched for context)
+        \(fuzzyTxStr.isEmpty ? "No specific matches found in history." : fuzzyTxStr)
+        
+        ## User Question
+        \(prompt)
+        
+        ## RESPONSE RULES:
+        1. **BE CONCISE** — Answer in 3-5 bullet points. Max 120 words total. No fluff.
+        2. **POINTWISE FORMAT** — Use bullet points (•), not paragraphs. Each bullet = one clear insight.
+        3. **TABLES** — Only use a simple 2-column vertical table (Label | Value) when the user asks for a comparison.
+        4. **TONE** — Be a smart, witty financial friend. Not a corporate robot.
+        5. **₹ ALWAYS** — All amounts in ₹ with no decimal places.
+        6. **ADMIT GAPS** — If the data doesn't cover what the user asked, say so honestly.
+        7. **STRICT ISOLATION** — Do NOT provide app instructions here. If the user asks "how to do X", refer them to the Help AI in Settings.
+        """
         
         do {
             let text = try await generateContent(systemPrompt: systemPrompt)
             if text.isEmpty { return "I couldn't generate a response." }
             return text
         } catch {
-            if error.localizedDescription.contains("400") || error.localizedDescription.contains("403") {
-                 let model = UserDefaults.standard.string(forKey: "aiModel") ?? "unknown"
-                 return "Unable to access the selected AI model (\(model)). Attempted fallback failed. Please check your API Key."
-            }
             return "Error: \(error.localizedDescription)"
         }
     }
@@ -354,6 +408,7 @@ class AIManager {
         • Transactions this month: \(context.transactionCount) (avg ₹\(Int(context.avgTransactionSize)) each)
         • Savings rate: \(context.savingsRate)%
         • Biggest spending day: \(context.biggestSpendingDay.map { "\($0.day) - ₹\(Int($0.amount))" } ?? "N/A")
+        \(context.projectStats)
         
         TODAY'S ANGLE: \(angle.uppercased()) (seed: \(randomSeed))
         
@@ -511,6 +566,25 @@ class AIManager {
         } catch {
             return ""
         }
+    }
+    
+    // MARK: - AI Helpers
+    
+    private func getRelevantContext(from transactions: [Transaction], for prompt: String) -> String {
+        let kw = extractKeywords(from: prompt)
+        if kw.isEmpty { return "No specific keyword matches found." }
+        
+        let filtered = transactions.filter { tx in
+            let text = "\(tx.merchant) \(tx.category) \(tx.notes) \(tx.type)".lowercased()
+            return kw.contains { text.contains($0) }
+        }
+        
+        if filtered.isEmpty { return "No transactions directly matched search keywords." }
+        
+        // Return top 15 most relevant
+        return filtered.prefix(15).map { tx in
+            "\(tx.date.formatted(date: .numeric, time: .omitted))|\(tx.merchant)|₹\(Int(tx.amount))|\(tx.category)|\(tx.type == .income ? "IN" : "EX")"
+        }.joined(separator: "\n")
     }
 }
 

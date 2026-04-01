@@ -95,7 +95,6 @@ struct DashboardHeader: View {
                             }
                         )
                     StatCard(title: "Spent", value: -spent, icon: "creditcard.fill", color: .red, isNegative: true)
-                        .tutorialTarget(.expenseOverview)
                     StatCard(title: "Inflow", value: monthlyIncome, icon: "arrow.down.circle.fill", color: .green)
                     StatCard(title: "Saved", value: max(0, potentialSavings), icon: "leaf.fill", color: .teal)
                 }

@@ -23,7 +23,7 @@ class AIPersonaEngine {
                 let defaultPersona = """
                 [STATUS: New User — Insufficient Data]
                 This user just started. No spending patterns or self-assessment available.
-                → Ask open-ended questions about their financial goals.
+                → Ask open-ended questions about their financial projects.
                 → Be warm, encouraging, and non-judgmental.
                 → Do not make assumptions about their habits.
                 """
@@ -51,7 +51,7 @@ class AIPersonaEngine {
             • Impulse Triggers: What situations or emotions drive them to overspend? (Based on their self-reported impulse level)
             • Lifestyle Creep Risk: When they get extra money, do they spend or save? How susceptible are they?
             • Communication Guide: EXACTLY how to talk to this user. Be specific — are they fragile (be gentle), thick-skinned (roast them), data-driven (show numbers), or emotion-driven (use stories)?
-            • Active Goals & Concerns: Any specific financial goals, worries, or life events they've mentioned or implied.
+            • Active Projects & Concerns: Any specific financial projects, worries, or life events they've mentioned or implied.
             • Behavioral Shift: Write "Day-1 baseline — self-reported only, no behavioral data yet."
             • Agent Instructions: One sentence telling other AI agents the MOST important thing to remember when talking to this user.
             
@@ -96,7 +96,7 @@ class AIPersonaEngine {
         USER'S SELF-ASSESSMENT (Onboarding):
         \(onboardingProfile.isEmpty ? "Not completed." : onboardingProfile)
         
-        RECENT CHAT SIGNALS (emotions/goals the user revealed in conversation):
+        RECENT CHAT SIGNALS (emotions/projects the user revealed in conversation):
         \(recentChatSignals)
         \(contextAddition)\(historySummary)
         
@@ -107,7 +107,7 @@ class AIPersonaEngine {
         • Impulse Triggers: Which merchants or categories show impulsive patterns? (e.g., "Late-night Swiggy orders 3x/week suggest emotional eating spending.")
         • Lifestyle Creep Risk: Are their discretionary categories growing month-over-month? Are they susceptible to lifestyle inflation?
         • Communication Guide: EXACTLY how to talk to this user. Based on their chosen motivation style and observed behavior. E.g., "Responds to dark humor and blunt callouts. Avoid corporate jargon — they'll disengage."
-        • Active Goals & Concerns: Any specific goals, fears, or life events from their chat signals or onboarding. E.g., "Wants to save for a trip to Europe. Stressed about upcoming rent increase."
+        • Active Projects & Concerns: Any specific projects, fears, or life events from their chat signals or onboarding. E.g., "Wants to save for a trip to Europe. Stressed about upcoming rent increase."
         • Behavioral Shift: Compare to the historical snapshots above. Is there a multi-week trend? E.g., "Discipline improving — Food spending down 15% over 3 weeks." If no history, write "Initial profile established."
         • Agent Instructions: One critical sentence for other AI agents. E.g., "This user responds well to specific numbers and comparisons, not vague encouragement. Push them on Food category — that's where they bleed money."
         
@@ -145,7 +145,7 @@ class AIPersonaEngine {
         
         Focus EXCLUSIVELY on:
         1. Emotional state — Are they stressed, guilty, hopeful, anxious, proud, defeated?
-        2. Stated goals & ambitions — e.g. "I want to buy a house in 2 years", "I'm trying to save for a trip"
+        2. Stated projects & ambitions — e.g. "I want to buy a house in 2 years", "I'm trying to save for a trip"
         3. Financial fears & self-beliefs — e.g. "I'll never get out of debt", "I suck at saving"
         4. Specific struggles or habits they admitted — e.g. "I always buy when bored", "I give in when friends pressure me"
         5. Important external context — e.g. upcoming big expenses, job uncertainty, life events they mentioned

@@ -50,7 +50,6 @@ struct SettingsView: View {
                                 }
                                 #endif
                         }
-                        .tutorialTarget(.settingsSetup)
                         
                         // Provider Toggle
                         Picker("AI Provider", selection: $aiProvider) {
@@ -78,7 +77,6 @@ struct SettingsView: View {
                                 Text("GPT 3.5 Turbo").tag("gpt-3.5-turbo")
                             }
                         }
-                        .tutorialTarget(.settingsSetup)
                         
                         VStack(alignment: .leading, spacing: 4) {
                             Text("\(aiProvider == "gemini" ? "Gemini" : "OpenAI") API Key")
@@ -93,7 +91,6 @@ struct SettingsView: View {
                                     .textContentType(.password)
                             }
                         }
-                        .tutorialTarget(.settingsSetup)
                         
                         Button("Save Configuration") {
                             let cleanedGemini = geminiApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -105,13 +102,8 @@ struct SettingsView: View {
                             openAIApiKey = cleanedOpenAI
                             
                             isSaved = true
-                            
-                            if monthlySalary > 0 {
-                                tutorialManager.completeStep(.settingsSetup)
-                            }
                         }
                         .disabled(aiProvider == "gemini" ? geminiApiKey.isEmpty : openAIApiKey.isEmpty)
-                        .tutorialTarget(.settingsSetup)
                     }
                     .id("settingsTop")
                     
@@ -124,11 +116,22 @@ struct SettingsView: View {
                         }
                     }
                     
-                    Section("Help") {
+                    Section(header: Text("Help & Support")) {
                         Button {
                             tutorialManager.startTutorial()
                         } label: {
-                            Label("Run Tutorial", systemImage: "play.circle")
+                            Label("Replay Tutorial", systemImage: "play.circle")
+                        }
+                        
+                        NavigationLink {
+                             AIInsightsView(isHelpMode: true)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label("Ask AI how to use this app", systemImage: "sparkles")
+                                Text("I know every feature and can guide you step-by-step.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                     
@@ -143,20 +146,6 @@ struct SettingsView: View {
                     }
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .onAppear {
-                    if tutorialManager.currentStep == .settingsSetup {
-                        withAnimation {
-                            proxy.scrollTo("settingsTop", anchor: .top)
-                        }
-                    }
-                }
-                .onChange(of: tutorialManager.currentStep) { step in
-                    if step == .settingsSetup {
-                        withAnimation {
-                            proxy.scrollTo("settingsTop", anchor: .top)
-                        }
-                    }
-                }
             }
             .navigationTitle("Settings")
             .onAppear {

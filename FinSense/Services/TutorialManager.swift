@@ -3,53 +3,43 @@ import Combine
 
 /// Tutorial step definitions
 enum TutorialStep: Int, CaseIterable, Hashable {
-    case welcome = 0
-    case editBalance
-    case expenseOverview
-    case spendingTrends // New step
+    case editBalance = 0
+    case projects
     case addTransaction
-    case settingsSetup
-    case aiChat
     case budgeting
+    case aiChat
     case complete
     
     var title: String {
         switch self {
-        case .welcome: return "Welcome"
         case .editBalance: return "Set Balance"
-        case .expenseOverview: return "Track Expenses"
-        case .spendingTrends: return "Spending Trends"
-        case .addTransaction: return "Add Transaction"
-        case .settingsSetup: return "Setup"
-        case .aiChat: return "AI Insight"
+        case .addTransaction: return "Quick Add"
+        case .projects: return "Projects & Vaults"
         case .budgeting: return "Smart Budgets"
-        case .complete: return "For You!"
+        case .aiChat: return "Ask Finlytics Anything"
+        case .complete: return "Finish!"
         }
     }
     
     var instruction: String {
         switch self {
-        case .welcome: return ""
-        case .editBalance: return "Tap here to set your current account balance."
-        case .expenseOverview: return "This card shows your monthly spending breakdown."
-        case .spendingTrends: return "View your spending trends and overall expenses here."
-        case .addTransaction: return "Tap + to log your first expense (or use Smart Paste!)."
-        case .settingsSetup: return "Set your income and API key here."
-        case .aiChat: return "Ask the AI for personalized financial advice."
-        case .budgeting: return "Generate smart budgets based on your spending."
-        case .complete: return "You're all set! Enjoy Finlytics."
+        case .editBalance: return "Tap the balance card to set your current savings. Everything is calculated relative to this."
+        case .addTransaction: return "Log expenses manually or use 'Smart Paste' with natural language (e.g., 'spent 50 on coffee')."
+        case .projects: return "Organize specific events (trips, weddings) into Projects. Swipe left to 'Hide' projects into the secure Vault."
+        case .budgeting: return "Set monthly category limits. I'll track your real-time spending versus these budgets."
+        case .aiChat: return "Talk to me here for spending analysis and strategy. I don't give app help here to keep your data focus sharp."
+        case .complete: return "You're all set! For step-by-step guides on every feature, use 'App Help' in Settings anytime."
         }
     }
     
     // Which tab needs to be active for this step
     var targetTab: Int? {
         switch self {
-        case .welcome, .editBalance, .expenseOverview, .spendingTrends: return 0 // Dashboard
+        case .editBalance, .projects: return 0 // Dashboard
         case .addTransaction: return 1 // Transactions
-        case .settingsSetup: return 4 // Settings
-        case .aiChat: return 2 // Chat
         case .budgeting: return 3 // Budget
-        case .complete: return nil // Stay on current tab (Budget)
+        case .aiChat: return 2 // Chat
+        case .complete: return nil
         }
     }
 }
@@ -58,7 +48,7 @@ enum TutorialStep: Int, CaseIterable, Hashable {
 class TutorialManager: ObservableObject {
     static let shared = TutorialManager()
     
-    @Published var currentStep: TutorialStep = .welcome
+    @Published var currentStep: TutorialStep = .editBalance
     @Published var isActive: Bool = false
     @Published var showWelcome: Bool = false
     @Published var selectedTab: Int = 0
@@ -80,9 +70,10 @@ class TutorialManager: ObservableObject {
     }
     
     func startTutorial() {
-        showWelcome = true
-        currentStep = .welcome
-        isActive = false // Active starts after welcome
+        showWelcome = false // Never show welcome on manual replay
+        isActive = true
+        currentStep = .editBalance
+        selectedTab = 0
     }
     
     // Called when "Get Started" is clicked
@@ -108,13 +99,17 @@ class TutorialManager: ObservableObject {
         let allSteps = TutorialStep.allCases
         if let currentIndex = allSteps.firstIndex(of: currentStep),
            currentIndex < allSteps.count - 1 {
-            withAnimation {
+            // 1. Sync the current step with animation
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 currentStep = allSteps[currentIndex + 1]
             }
             
-            // Auto-Switch Tab
+            // 2. Sync the selected tab directly
             if let tab = currentStep.targetTab {
-                selectedTab = tab
+                DispatchQueue.main.async {
+                    self.selectedTab = tab
+                }
+                print("DEBUG: Tutorial advancing to \(currentStep) - switching to tab \(tab)")
             }
             
             if currentStep == .complete {

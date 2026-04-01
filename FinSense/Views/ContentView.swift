@@ -20,8 +20,10 @@ struct ContentView: View {
                         Label("Transactions", systemImage: "list.bullet.rectangle")
                     }
                 
-                AIInsightsView()
-                    .tag(2)
+                NavigationView {
+                    AIInsightsView(isHelpMode: false)
+                }
+                .tag(2)
                     .tabItem {
                         Label("AI Chat", systemImage: "sparkles")
                     }

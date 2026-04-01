@@ -23,92 +23,99 @@ struct AIInsightsView: View {
     @EnvironmentObject var tutorialManager: TutorialManager
     @AppStorage("monthlySalary") private var monthlySalary: Double = 0.0
     
-    @State private var messages: [Message] = [
-        Message(text: "Hello! I'm your Finlytics assistant. How can I help you manage your finances today?", isUser: false)
-    ]
+    let isHelpMode: Bool
+    
+    @State private var messages: [Message]
     @State private var inputText: String = ""
     @State private var isGenerating: Bool = false
     @FocusState private var isInputFocused: Bool
     
+    init(isHelpMode: Bool = false) {
+        self.isHelpMode = isHelpMode
+        let initialText = isHelpMode ? 
+            "Hello! I'm here to help you get the most out of Finlytics. Ask me anything about how the app works!" :
+            "Hello! I'm your Finlytics assistant. How can I help you manage your finances today?"
+        
+        _messages = State(initialValue: [Message(text: initialText, isUser: false)])
+    }
+    
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 14) {
-                            ForEach(messages) { message in
-                                ChatBubble(message: message)
-                                    .id(message.id)
-                            }
-                            
-                            if isGenerating {
-                                TypingIndicator()
-                                    .id("typing")
-                            }
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 14) {
+                        ForEach(messages) { message in
+                            ChatBubble(message: message)
+                                .id(message.id)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                    }
-                    .scrollDismissesKeyboard(.interactively)
-                    .onChange(of: messages.count) { _, _ in
-                        withAnimation(.easeOut(duration: 0.3)) {
-                            proxy.scrollTo(messages.last?.id, anchor: .bottom)
-                        }
-                    }
-                    .onChange(of: isGenerating) { _, _ in
-                        if isGenerating {
-                            withAnimation(.easeOut(duration: 0.3)) {
-                                proxy.scrollTo("typing", anchor: .bottom)
-                            }
-                        }
-                    }
-                }
-                
-                // Input Bar
-                VStack(spacing: 0) {
-                    Divider().opacity(0.3)
-                    HStack(alignment: .bottom, spacing: 10) {
-                        TextField("Ask anything...", text: $inputText, axis: .vertical)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(Color(.systemGray5))
-                            .clipShape(Capsule())
-                            .focused($isInputFocused)
-                            .lineLimit(1...4)
                         
-                        Button {
-                            sendMessage()
-                        } label: {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 36, height: 36)
-                                .background(
-                                    inputText.isEmpty || isGenerating ?
-                                    AnyShapeStyle(Color.gray.opacity(0.4)) :
-                                    AnyShapeStyle(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                )
-                                .clipShape(Circle())
+                        if isGenerating {
+                            TypingIndicator()
+                                .id("typing")
                         }
-                        .disabled(inputText.isEmpty || isGenerating)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .tutorialTarget(.aiChat)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                 }
-                .background(.ultraThinMaterial)
-            }
-            .navigationTitle("AI Chat")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        messages = [Message(text: "Chat cleared. How can I help?", isUser: false)]
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: messages.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        proxy.scrollTo(messages.last?.id, anchor: .bottom)
                     }
+                }
+                .onChange(of: isGenerating) { _, _ in
+                    if isGenerating {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            proxy.scrollTo("typing", anchor: .bottom)
+                        }
+                    }
+                }
+            }
+            
+            // Input Bar
+            VStack(spacing: 0) {
+                Divider().opacity(0.3)
+                HStack(alignment: .bottom, spacing: 10) {
+                    TextField("Ask anything...", text: $inputText, axis: .vertical)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color(.systemGray5))
+                        .clipShape(Capsule())
+                        .focused($isInputFocused)
+                        .lineLimit(1...4)
+                    
+                    Button {
+                        sendMessage()
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 36, height: 36)
+                            .background(
+                                inputText.isEmpty || isGenerating ?
+                                AnyShapeStyle(Color.gray.opacity(0.4)) :
+                                AnyShapeStyle(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            )
+                            .clipShape(Circle())
+                    }
+                    .disabled(inputText.isEmpty || isGenerating)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .tutorialTarget(.aiChat)
+            }
+            .background(.ultraThinMaterial)
+        }
+        .navigationTitle(isHelpMode ? "App Help Guide" : "Financial Strategist")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    messages = [Message(text: "Chat cleared. How can I help?", isUser: false)]
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
                 }
             }
         }
@@ -136,7 +143,8 @@ struct AIInsightsView: View {
                     for: text,
                     context: transactions,
                     budgets: budgets,
-                    monthlySalary: monthlySalary
+                    monthlySalary: monthlySalary,
+                    isHelpMode: isHelpMode
                 )
                 
                 await MainActor.run {

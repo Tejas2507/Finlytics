@@ -16,6 +16,7 @@ class Transaction {
     var type: TransactionType
     var category: String
     var isHidden: Bool = false
+    var projectNames: [String] = []
     
     init(amount: Double, date: Date = Date(), merchant: String, notes: String = "", type: TransactionType = .expense, category: String = "Uncategorized", isHidden: Bool = false) {
         self.id = UUID()

@@ -14,6 +14,7 @@ struct AddTransactionView: View {
     
     // Optional transaction for editing
     var existingTransaction: Transaction? = nil
+    var preselectedProject: String? = nil
     
     @State private var amount: Double = 0.0
     @State private var merchant: String = ""
@@ -28,6 +29,10 @@ struct AddTransactionView: View {
     @State private var pastedContent = ""
     @State private var isProcessingPaste = false
     @State private var isHidden = false
+    @State private var selectedProjects: Set<String> = []
+    @State private var showingProjectPicker = false
+    
+    @Query(sort: \Project.dateCreated, order: .reverse) private var projects: [Project]
     
     var categories: [String] {
         selectedType == .expense ? Category.expenseCategories : Category.incomeCategories
@@ -51,160 +56,219 @@ struct AddTransactionView: View {
     }
     
     var body: some View {
-        NavigationView {
-            Form {
-                Section {
-                    Picker("Type", selection: $selectedType) {
-                        ForEach(TransactionType.allCases, id: \.self) { type in
-                            Text(type.rawValue).tag(type)
-                        }
+        Form {
+            Section {
+                Picker("Type", selection: $selectedType) {
+                    ForEach(TransactionType.allCases, id: \.self) { type in
+                        Text(type.rawValue).tag(type)
                     }
-                    .pickerStyle(.segmented)
-                    .onChange(of: selectedType) {
-                        // Reset category only if it doesn't match the new type group
-                        if !categories.contains(selectedCategory) {
-                            selectedCategory = categories.first ?? "Other"
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: selectedType) {
+                    // Reset category only if it doesn't match the new type group
+                    if !categories.contains(selectedCategory) {
+                        selectedCategory = categories.first ?? "Other"
+                    }
+                }
+            }
+            
+            Section("Details") {
+                TextField("Amount", value: $amount, format: .currency(code: "INR"))
+                    #if os(iOS)
+                    .keyboardType(.decimalPad)
+                    #endif
+                    .font(.title3)
+                
+                // Merchant with autocomplete
+                VStack(alignment: .leading, spacing: 0) {
+                    TextField("Merchant / Source", text: $merchant)
+                        .onChange(of: merchant) {
+                            showMerchantSuggestions = !filteredMerchants.isEmpty && merchant.count >= 2
                         }
+                    
+                    if showMerchantSuggestions {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(filteredMerchants.prefix(5), id: \.merchant) { item in
+                                    Button {
+                                        merchant = item.merchant
+                                        // Auto-select category
+                                        if categories.contains(item.category) {
+                                            selectedCategory = item.category
+                                        }
+                                        showMerchantSuggestions = false
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: Category.icon(for: item.category))
+                                                .foregroundColor(Category.color(for: item.category))
+                                                .frame(width: 24)
+                                            VStack(alignment: .leading) {
+                                                Text(item.merchant)
+                                                    .foregroundColor(.primary)
+                                                Text(item.category)
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            Spacer()
+                                        }
+                                        .padding(.vertical, 8)
+                                        .padding(.horizontal, 4)
+                                    }
+                                    Divider()
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 150)
+                        .background(Color(.systemBackground))
+                        .cornerRadius(8)
+                        .shadow(radius: 2)
                     }
                 }
                 
-                Section("Details") {
-                    TextField("Amount", value: $amount, format: .currency(code: "INR"))
-                        #if os(iOS)
-                        .keyboardType(.decimalPad)
-                        #endif
-                        .font(.title3)
-                    
-                    // Merchant with autocomplete
-                    VStack(alignment: .leading, spacing: 0) {
-                        TextField("Merchant / Source", text: $merchant)
-                            .onChange(of: merchant) {
-                                showMerchantSuggestions = !filteredMerchants.isEmpty && merchant.count >= 2
-                            }
-                        
-                        if showMerchantSuggestions {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    ForEach(filteredMerchants.prefix(5), id: \.merchant) { item in
-                                        Button {
-                                            merchant = item.merchant
-                                            // Auto-select category
-                                            if categories.contains(item.category) {
-                                                selectedCategory = item.category
-                                            }
-                                            showMerchantSuggestions = false
-                                        } label: {
-                                            HStack {
-                                                Image(systemName: Category.icon(for: item.category))
-                                                    .foregroundColor(Category.color(for: item.category))
-                                                    .frame(width: 24)
-                                                VStack(alignment: .leading) {
-                                                    Text(item.merchant)
-                                                        .foregroundColor(.primary)
-                                                    Text(item.category)
-                                                        .font(.caption)
-                                                        .foregroundColor(.secondary)
-                                                }
-                                                Spacer()
-                                            }
-                                            .padding(.vertical, 8)
-                                            .padding(.horizontal, 4)
-                                        }
-                                        Divider()
+                DatePicker("Date & Time", selection: $date, displayedComponents: [.date, .hourAndMinute])
+                
+                Picker("Category", selection: $selectedCategory) {
+                    ForEach(categories, id: \.self) { category in
+                        HStack {
+                            Image(systemName: Category.icon(for: category))
+                            Text(category)
+                        }
+                        .tag(category)
+                    }
+                }
+            }
+            
+            Section("Notes") {
+                TextField("Optional notes", text: $notes)
+            }
+            
+            // Project Tagger
+            if !projects.filter({ !$0.isArchived && !$0.isHidden }).isEmpty {
+                let activeProjects = projects.filter({ !$0.isArchived && !$0.isHidden })
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(activeProjects.prefix(5)) { project in
+                                ProjectChip(
+                                    project: project,
+                                    isSelected: selectedProjects.contains(project.name)
+                                ) {
+                                    if selectedProjects.contains(project.name) {
+                                        selectedProjects.remove(project.name)
+                                    } else {
+                                        selectedProjects.insert(project.name)
                                     }
                                 }
                             }
-                            .frame(maxHeight: 150)
-                            .background(Color(.systemBackground))
-                            .cornerRadius(8)
-                            .shadow(radius: 2)
-                        }
-                    }
-                    
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
-                    
-                    Picker("Category", selection: $selectedCategory) {
-                        ForEach(categories, id: \.self) { category in
-                            HStack {
-                                Image(systemName: Category.icon(for: category))
-                                Text(category)
+                            
+                            if activeProjects.count > 5 {
+                                Button {
+                                    showingProjectPicker = true
+                                } label: {
+                                    Text("See All (\(activeProjects.count))")
+                                        .font(.caption)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(Color(.systemGray6))
+                                        .foregroundColor(.indigo)
+                                        .clipShape(Capsule())
+                                }
                             }
-                            .tag(category)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } header: {
+                    HStack {
+                        Text("Tag to Projects")
+                        Spacer()
+                        if activeProjects.count <= 5 {
+                            Button("See All") { showingProjectPicker = true }
+                                .font(.caption)
+                                .textCase(.none)
                         }
                     }
-                }
-                
-                Section("Notes") {
-                    TextField("Optional notes", text: $notes)
-                }
-                
-                if existingTransaction != nil {
-                    Section {
-                        Toggle(isOn: $isHidden) {
-                            Label("Hide Transaction", systemImage: "eye.slash")
-                        }
-                        .tint(.purple)
-                    } footer: {
-                        Text("Hidden transactions are excluded from the transactions list but still counted in all calculations.")
-                    }
-                }
-                
-                Section {
-                    Button(action: performSmartPaste) {
-                        if isProcessingPaste {
-                            HStack {
-                                Text("Analyzing Clipboard...")
-                                Spacer()
-                                ProgressView()
-                            }
-                        } else {
-                            Text("Read from Clipboard (Smart Paste)")
-                        }
-                    }
-                    .disabled(isProcessingPaste)
-                    .foregroundColor(.blue)
+                } footer: {
+                    Text("Link this transaction to one or more projects (trips, events, etc.).")
                 }
             }
-            .navigationTitle(existingTransaction == nil ? "Add Transaction" : "Edit Transaction")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+            
+            if existingTransaction != nil {
+                Section {
+                    Toggle(isOn: $isHidden) {
+                        Label("Hide Transaction", systemImage: "eye.slash")
+                    }
+                    .tint(.purple)
+                } footer: {
+                    Text("Hidden transactions are excluded from the transactions list but still counted in all calculations.")
+                }
+            }
+            
+            Section {
+                Button(action: performSmartPaste) {
+                    if isProcessingPaste {
+                        HStack {
+                            Text("Analyzing Clipboard...")
+                            Spacer()
+                            ProgressView()
+                        }
+                    } else {
+                        Text("Read from Clipboard (Smart Paste)")
+                    }
+                }
+                .disabled(isProcessingPaste)
+                .foregroundColor(.blue)
+            }
+        }
+        .navigationTitle(existingTransaction == nil ? "Add Transaction" : "Edit Transaction")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    dismiss()
+                }
+            }
+            
+            if let tx = existingTransaction {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Delete", role: .destructive) {
+                        modelContext.delete(tx)
                         dismiss()
                     }
-                }
-                
-                if let tx = existingTransaction {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Delete", role: .destructive) {
-                            modelContext.delete(tx)
-                            dismiss()
-                        }
-                        .foregroundColor(.red)
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        saveTransaction()
-                    }
-                    .disabled(merchant.isEmpty || amount == 0)
+                    .foregroundColor(.red)
                 }
             }
-            .onAppear {
-                if let tx = existingTransaction {
-                    // Pre-fill fields
-                    amount = tx.amount
-                    merchant = tx.merchant
-                    date = tx.date
-                    notes = tx.notes
-                    selectedType = tx.type
-                    selectedCategory = tx.category
-                    isHidden = tx.isHidden
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    saveTransaction()
                 }
+                .disabled(merchant.isEmpty || amount == 0)
             }
-            .alert("Smart Paste", isPresented: $showPasteAlert) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(pastedContent)
+        }
+        .onAppear {
+            if let tx = existingTransaction {
+                // Pre-fill fields
+                amount = tx.amount
+                merchant = tx.merchant
+                date = tx.date
+                notes = tx.notes
+                selectedType = tx.type
+                selectedCategory = tx.category
+                isHidden = tx.isHidden
+                selectedProjects = Set(tx.projectNames)
+            } else if let preProject = preselectedProject {
+                selectedProjects = [preProject]
+            }
+        }
+        .alert("Smart Paste", isPresented: $showPasteAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(pastedContent)
+        }
+        .sheet(isPresented: $showingProjectPicker) {
+            NavigationView {
+                ProjectPickerSheet(
+                    selectedProjects: $selectedProjects,
+                    projects: projects.filter { !$0.isArchived && !$0.isHidden }
+                )
             }
         }
     }
@@ -219,6 +283,7 @@ struct AddTransactionView: View {
             tx.type = selectedType
             tx.category = selectedCategory
             tx.isHidden = isHidden
+            tx.projectNames = Array(selectedProjects)
         } else {
             // Create new
             let transaction = Transaction(
@@ -229,6 +294,7 @@ struct AddTransactionView: View {
                 type: selectedType,
                 category: selectedCategory
             )
+            transaction.projectNames = Array(selectedProjects)
             modelContext.insert(transaction)
         }
         dismiss()
@@ -297,7 +363,86 @@ struct AddTransactionView: View {
     }
 }
 
+// MARK: - Project Chip
+struct ProjectChip: View {
+    let project: Project
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(project.emoji)
+                Text(project.name)
+                    .lineLimit(1)
+            }
+            .font(.caption)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isSelected ? Color.indigo.opacity(0.15) : Color(.systemGray6))
+            .foregroundColor(isSelected ? .indigo : .primary)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(isSelected ? Color.indigo : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Project Picker Sheet
+struct ProjectPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selectedProjects: Set<String>
+    let projects: [Project]
+    @State private var searchText = ""
+    
+    var filteredProjects: [Project] {
+        if searchText.isEmpty { return projects }
+        return projects.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+    
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(filteredProjects) { project in
+                    Button {
+                        if selectedProjects.contains(project.name) {
+                            selectedProjects.remove(project.name)
+                        } else {
+                            selectedProjects.insert(project.name)
+                        }
+                    } label: {
+                        HStack {
+                            Text(project.emoji)
+                            Text(project.name)
+                                .foregroundColor(.primary)
+                            Spacer()
+                            if selectedProjects.contains(project.name) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.indigo)
+                            } else {
+                                Image(systemName: "circle")
+                                    .foregroundColor(.secondary.opacity(0.4))
+                            }
+                        }
+                    }
+                }
+            }
+            .searchable(text: $searchText, prompt: "Search Projects")
+            .navigationTitle("Select Projects")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
 #Preview {
     AddTransactionView()
         .modelContainer(for: Transaction.self, inMemory: true)
 }
+

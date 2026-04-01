@@ -28,6 +28,7 @@ class InsightEngine {
         let incomeThisMonth: Double
         let savingsRate: Int  // (income - expenses) / income * 100
         let biggestSpendingDay: (day: String, amount: Double)?
+        let projectStats: String // NEW: Pre-rendered project string
     }
     
     // MARK: - Dynamic Outlier Detection
@@ -45,7 +46,7 @@ class InsightEngine {
     }
     
     // MARK: - Build Context from Transactions
-    func buildContext(from transactions: [Transaction]) -> FinancialContext {
+    func buildContext(from transactions: [Transaction], projects: [Project]) -> FinancialContext {
         let calendar = Calendar.current
         let now = Date()
         let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
@@ -147,7 +148,8 @@ class InsightEngine {
             avgTransactionSize: avgTxSize,
             incomeThisMonth: incomeTotal,
             savingsRate: savingsRate,
-            biggestSpendingDay: biggestDay.map { (biggestDayName ?? "Unknown", $0.value) }
+            biggestSpendingDay: biggestDay.map { (biggestDayName ?? "Unknown", $0.value) },
+            projectStats: MerchantAnalytics.shared.buildProjectContext(transactions: transactions, projects: projects)
         )
     }
     
@@ -233,7 +235,8 @@ class InsightEngine {
             return setupInsight
         }
         
-        let financialContext = buildContext(from: transactions)
+        let projects = (try? context.fetch(FetchDescriptor<Project>())) ?? []
+        let financialContext = buildContext(from: transactions, projects: projects)
         
         do {
             // 70% chance for Personal Insight, 30% for General Tip
