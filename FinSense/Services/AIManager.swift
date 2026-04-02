@@ -60,26 +60,42 @@ class AIManager {
         """
     }
     
-    // Unified Generation logic with AI Provider routing and Persona Injection
-    func generateContent(systemPrompt: String) async throws -> String {
+    // MARK: - Valid App Categories (for Smart Paste validation)
+    private let validExpenseCategories = [
+        "Food & Dining", "Shopping", "Transportation", "Entertainment",
+        "Bills & Utilities", "Healthcare", "Education", "Personal Care",
+        "Travel", "Investment", "Gift", "Other"
+    ]
+    private let validIncomeCategories = [
+        "Salary", "Freelance", "Business", "Investment", "Gift", "Other"
+    ]
+    
+    // Unified Generation logic with AI Provider routing and optional Persona Injection
+    func generateContent(systemPrompt: String, injectPersona: Bool = true) async throws -> String {
         let aiProvider = UserDefaults.standard.string(forKey: "aiProvider") ?? "gemini"
-        let persona = UserDefaults.standard.string(forKey: "userAIPersona") ?? ""
-        let personaInjection = persona.isEmpty ? "" : """
         
+        var finalPrompt = systemPrompt
         
-        --- HIDDEN BEHAVIORAL DOSSIER (The user does NOT see this) ---
-        The following is a psychological profile of the user, generated from their spending patterns, onboarding answers, and chat history. Use it to deeply personalize your tone, advice, and approach.
-        
-        IMPORTANT RULES FOR USING THIS DOSSIER:
-        • Use it NATURALLY — let it inform your tone and advice, but don't reference it explicitly.
-        • Focus especially on 'Communication Guide' and 'Agent Instructions' for HOW to talk.
-        • Only mention specific dossier insights when directly relevant to the user's question.
-        • NEVER tell the user you have this profile. It should feel like you just "get" them.
-        
-        \(persona)
-        --- END DOSSIER ---
-        """
-        let finalPrompt = systemPrompt + personaInjection
+        if injectPersona {
+            let persona = UserDefaults.standard.string(forKey: "userAIPersona") ?? ""
+            if !persona.isEmpty {
+                finalPrompt += """
+                
+                
+                --- HIDDEN BEHAVIORAL DOSSIER (The user does NOT see this) ---
+                The following is a psychological profile of the user, generated from their spending patterns, onboarding answers, and chat history. Use it to deeply personalize your tone, advice, and approach.
+                
+                IMPORTANT RULES FOR USING THIS DOSSIER:
+                • Use it NATURALLY — let it inform your tone and advice, but don't reference it explicitly.
+                • Focus especially on 'Communication Guide' and 'Agent Instructions' for HOW to talk.
+                • Only mention specific dossier insights when directly relevant to the user's question.
+                • NEVER tell the user you have this profile. It should feel like you just "get" them.
+                
+                \(persona)
+                --- END DOSSIER ---
+                """
+            }
+        }
         
         if aiProvider == "gemini" {
             let apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
@@ -92,10 +108,10 @@ class AIManager {
         }
     }
 
-    // Helper to try selected model, then fallback to 2.5-flash if it fails
+    // Helper to try selected model, then fallback to gemini-flash-latest if it fails
     private func generateContentWithFallback(apiKey: String, systemPrompt: String) async throws -> String {
         // Migration: Reset any old/invalid model values to default
-        let validModels = ["gemini-flash-lite-latest", "gemini-2.5-flash"]
+        let validModels = ["gemini-flash-lite-latest", "gemini-flash-latest"]
         var selectedModel = UserDefaults.standard.string(forKey: "aiModel") ?? "gemini-flash-lite-latest"
         
         if !validModels.contains(selectedModel) {
@@ -113,29 +129,27 @@ class AIManager {
         } catch {
             print("DEBUG: Primary model \(selectedModel) failed. Error: \(error.localizedDescription)")
             
-            // If PRIMARY model fails, fallback to 2.5-flash
-            print("DEBUG: Falling back to gemini-2.5-flash")
-            let fallbackModel = GenerativeModel(name: "gemini-2.5-flash", apiKey: apiKey)
+            // If PRIMARY model fails, fallback to gemini-flash-latest
+            print("DEBUG: Falling back to gemini-flash-latest")
+            let fallbackModel = GenerativeModel(name: "gemini-flash-latest", apiKey: apiKey)
             do {
                 let fallbackResponse = try await fallbackModel.generateContent(systemPrompt)
                 return fallbackResponse.text ?? ""
             } catch {
-                 throw NSError(domain: "GeminiService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Primary (\(selectedModel)) & Fallback (2.5) failed. Error: \(error.localizedDescription)"])
+                 throw NSError(domain: "GeminiService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Primary (\(selectedModel)) & Fallback (Flash) failed. Error: \(error.localizedDescription)"])
             }
         }
     }
     
-    // Chat with Financial Agent — uses structured analytics + fuzzy TF-IDF fallback
-    func generateResponse(for prompt: String, context: [Transaction], budgets: [Budget], monthlySalary: Double, isHelpMode: Bool = false) async throws -> String {
-        let apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
-        if apiKey.isEmpty { return "Please set your Gemini API Key in Settings to use the AI assistant." }
-        
-        let model = GenerativeModel(name: "gemini-1.5-flash", apiKey: apiKey)
+    // MARK: - Chat with Financial Agent
+    // Uses structured analytics + fuzzy keyword matching + conversation memory
+    func generateResponse(for prompt: String, context: [Transaction], budgets: [Budget], monthlySalary: Double, projects: [Project] = [], conversationHistory: [String] = [], isHelpMode: Bool = false) async throws -> String {
         
         if isHelpMode {
             // ── HELP MODE: Strictly App Support ──
             // NO financial context (transactions, budgets, salary) is included here.
-            let systemPrompt = """
+            // Routes through the unified pipeline (fallback + provider routing)
+            let helpPrompt = """
             You are Finlytics App Guide — a precise, helpful expert on the Finlytics iOS app.
             
             ## MISSION:
@@ -156,25 +170,35 @@ class AIManager {
             """
             
             do {
-                let response = try await model.generateContent(systemPrompt)
-                return response.text ?? "I couldn't generate a help response. Please try again."
+                // Use unified pipeline but WITHOUT persona injection (Help AI doesn't need personality)
+                return try await generateContent(systemPrompt: helpPrompt, injectPersona: false)
             } catch {
-                throw error
+                return "Error connecting to AI service. Please check your API key and try again."
             }
         }
         
         // ── ANALYSIS MODE: Full Financial AI ──
+        // Filter out hidden transactions for privacy
+        let visibleTransactions = context.filter { !$0.isHidden }
+        
         let richContext = MerchantAnalytics.shared.buildRichContext(
-            transactions: context,
-            userQuery: prompt
+            transactions: visibleTransactions,
+            userQuery: prompt,
+            projects: projects
         )
         
-        let fuzzyTxStr = getRelevantContext(from: context, for: prompt)
+        let fuzzyTxStr = getRelevantContext(from: visibleTransactions, for: prompt)
         
-        // ── Budget Context ──
+        // ── Budget Context (Current Month) ──
         let calendar = Calendar.current
-        let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: Date()))!
-        let currentMonthTx = context.filter { $0.date >= startOfMonth }
+        let now = Date()
+        let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
+        let currentMonthTx = visibleTransactions.filter { $0.date >= startOfMonth }
+        
+        let monthFormatter = DateFormatter()
+        monthFormatter.dateFormat = "MMMM yyyy"
+        let currentMonthName = monthFormatter.string(from: now)
+        
         let budgetContext = budgets.map { budget in
             let spent = currentMonthTx.filter { $0.category == budget.category && $0.type == .expense }.reduce(0) { $0 + $1.amount }
             let pct = budget.monthlyLimit > 0 ? Int((spent / budget.monthlyLimit) * 100) : 0
@@ -183,18 +207,31 @@ class AIManager {
         
         let salaryContext = monthlySalary > 0 ? "Monthly Salary: ₹\(Int(monthlySalary))" : "Monthly Salary: Not set"
         
+        // ── Conversation Memory (last messages for continuity) ──
+        let conversationContext: String
+        if !conversationHistory.isEmpty {
+            conversationContext = """
+            ## Recent Conversation (for context continuity)
+            \(conversationHistory.joined(separator: "\n"))
+            """
+        } else {
+            conversationContext = ""
+        }
+        
         let systemPrompt = """
         You are Finlytics — a sharp, friendly financial advisor for Indian users. All amounts in ₹ (INR).
         
-        ## Pre-Computed Analytics (USE THESE NUMBERS — they are accurate)
+        ## Pre-Computed Analytics (USE THESE NUMBERS — they are accurate and pre-calculated)
         \(richContext)
         
-        ## Budget Status
-        \(budgetContext.isEmpty ? "No active budgets." : budgetContext)
+        ## Budget Status (Current Month — \(currentMonthName))
+        \(budgetContext.isEmpty ? "No active budgets set." : budgetContext)
         \(salaryContext)
         
-        ## Relevant Transactions (Matched for context)
-        \(fuzzyTxStr.isEmpty ? "No specific matches found in history." : fuzzyTxStr)
+        ## Relevant Transactions (Keyword-matched from history)
+        \(fuzzyTxStr.isEmpty ? "No specific matches found." : fuzzyTxStr)
+        
+        \(conversationContext)
         
         ## User Question
         \(prompt)
@@ -202,11 +239,12 @@ class AIManager {
         ## RESPONSE RULES:
         1. **BE CONCISE** — Answer in 3-5 bullet points. Max 120 words total. No fluff.
         2. **POINTWISE FORMAT** — Use bullet points (•), not paragraphs. Each bullet = one clear insight.
-        3. **TABLES** — Only use a simple 2-column vertical table (Label | Value) when the user asks for a comparison.
+        3. **TABLES** — Only use a simple 2-column vertical table (Label | Value) when the user asks for a comparison or breakdown.
         4. **TONE** — Be a smart, witty financial friend. Not a corporate robot.
         5. **₹ ALWAYS** — All amounts in ₹ with no decimal places.
         6. **ADMIT GAPS** — If the data doesn't cover what the user asked, say so honestly.
         7. **STRICT ISOLATION** — Do NOT provide app instructions here. If the user asks "how to do X", refer them to the Help AI in Settings.
+        8. **TIME AWARENESS** — Pay attention to the date provided. "This month" means the CURRENT month section. "Last month" means the LAST MONTH section. Do NOT mix up all-time totals with monthly data.
         """
         
         do {
@@ -218,45 +256,71 @@ class AIManager {
         }
     }
     
-    // Smart Paste: Parse text into transaction details
+    // MARK: - Smart Paste: Parse text into transaction details
     func parseTransaction(from text: String) async throws -> ParsedTransaction {
+        let allCategories = (validExpenseCategories + validIncomeCategories).joined(separator: ", ")
+        
         let prompt = """
         Extract the following transaction details from this text: "\(text)"
         
         Return JSON with these keys:
         - "amount": Double (numeric only)
         - "merchant": String (name of place/person)
-        - "category": String (best guess category e.g., Food, Transport, Salary)
+        - "category": String (MUST be one of: \(allCategories))
         - "type": String ("Income" or "Expense")
         
+        CATEGORY RULES:
+        - You MUST pick from the list above. Do not invent new categories.
+        - If unsure, use "Other".
+        - For food/restaurants/cafes, use "Food & Dining".
+        - For cab/auto/fuel, use "Transportation".
+        
         If a field is missing, use null.
-        Example: {"amount": 500.0, "merchant": "Uber", "category": "Transport", "type": "Expense"}
+        Return ONLY the raw JSON object, no markdown.
+        Example: {"amount": 500.0, "merchant": "Uber", "category": "Transportation", "type": "Expense"}
         """
         
         do {
-            let jsonString = try await generateContent(systemPrompt: prompt)
+            // No persona injection for structured JSON output
+            let jsonString = try await generateContent(systemPrompt: prompt, injectPersona: false)
             
             // Clean markdown code blocks if present
-            let cleanedJson = jsonString.replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "")
+            let cleanedJson = jsonString
+                .replacingOccurrences(of: "```json", with: "")
+                .replacingOccurrences(of: "```", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             
             guard let data = cleanedJson.data(using: .utf8) else { throw NSError(domain: "GeminiService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Invalid data"]) }
             
-            return try JSONDecoder().decode(ParsedTransaction.self, from: data)
+            var parsed = try JSONDecoder().decode(ParsedTransaction.self, from: data)
+            
+            // Validate category — if AI returned something not in our list, map to "Other"
+            if let cat = parsed.category {
+                let isExpense = parsed.type?.lowercased() == "expense"
+                let validList = isExpense ? validExpenseCategories : validIncomeCategories
+                if !validList.contains(cat) {
+                    // Try fuzzy match
+                    let fuzzyMatch = validList.first { $0.lowercased().contains(cat.lowercased()) || cat.lowercased().contains($0.lowercased()) }
+                    parsed = ParsedTransaction(amount: parsed.amount, merchant: parsed.merchant, category: fuzzyMatch ?? "Other", type: parsed.type)
+                }
+            }
+            
+            return parsed
         } catch {
             print("Smart Paste failed: \(error)")
             throw error
         }
     }
     
-    // Smart Budgeting: Analyze history and suggest monthly budgets
+    // MARK: - Smart Budgeting: Analyze history and suggest monthly budgets
     // Uses historical averages per actual calendar month
     func generateBudgetSuggestions(history: [Transaction]) async throws -> String {
         let calendar = Calendar.current
         let now = Date()
         let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
         
-        // Get all expenses
-        let allExpenses = history.filter { $0.type == .expense && !$0.category.lowercased().contains("invest") }
+        // Get all expenses (exclude hidden + investments)
+        let allExpenses = history.filter { !$0.isHidden && $0.type == .expense && !$0.category.lowercased().contains("invest") }
         let currentMonthExpenses = allExpenses.filter { $0.date >= startOfMonth }
         
         // IMPORTANT: Only use PAST completed months for averages (exclude current running month)
@@ -318,7 +382,7 @@ class AIManager {
         6. If the user is already spending conservatively, ACKNOWLEDGE it and set budgets that protect their good habits rather than demanding more cuts.
         7. Keep suggestions practical — don't tell someone spending ₹2,000/month on Food to cut to ₹1,200. That's unrealistic.
         
-        OUTPUT: Return ONLY a raw JSON array (no markdown):
+        OUTPUT: Return ONLY a raw JSON array (no markdown, no explanation):
         [
             {
                 "category": "String",
@@ -330,7 +394,8 @@ class AIManager {
         """
         
         do {
-            let rawText = try await generateContent(systemPrompt: prompt)
+            // No persona injection for JSON output
+            let rawText = try await generateContent(systemPrompt: prompt, injectPersona: false)
             let cleaned = rawText
                 .replacingOccurrences(of: "```json", with: "")
                 .replacingOccurrences(of: "```", with: "")
@@ -346,8 +411,9 @@ class AIManager {
     
     // Insight Generation (Legacy)
     func generateInsight(context: [Transaction], promptTemplate: String) async throws -> String {
-        // Prepare context
-        let recentTx = context.prefix(50).map {
+        // Prepare context — filter hidden
+        let visible = context.filter { !$0.isHidden }
+        let recentTx = visible.prefix(50).map {
             "\($0.date.formatted(date: .numeric, time: .omitted)): \($0.merchant) (\($0.amount))"
         }.joined(separator: "\n")
         
@@ -366,12 +432,18 @@ class AIManager {
             return "Could not generate insight."
         }
     }
-    // MARK: - TF-IDF Helpers
+    
+    // MARK: - TF-IDF Keyword Helpers
     private func extractKeywords(from text: String) -> [String] {
-        let stopWords: Set<String> = ["a", "an", "the", "and", "but", "or", "for", "nor", "on", "at", "to", "from", "by", "what", "is", "how", "much", "did", "i", "spend", "show", "me", "my", "transactions"]
+        let stopWords: Set<String> = [
+            "a", "an", "the", "and", "but", "or", "for", "nor", "on", "at", "to", "from", "by",
+            "what", "is", "how", "much", "did", "i", "show", "me", "my", "can", "you", "tell",
+            "give", "get", "about", "please", "do", "have", "has", "was", "were", "been",
+            "total", "all", "any", "some", "this", "that", "these", "those"
+        ]
         let words = text.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty && !stopWords.contains($0) && $0.count > 2 }
+            .filter { !$0.isEmpty && !stopWords.contains($0) && $0.count > 1 }
         return Array(Set(words)) // Unique keywords
     }
     
@@ -581,10 +653,9 @@ class AIManager {
         
         if filtered.isEmpty { return "No transactions directly matched search keywords." }
         
-        // Return top 15 most relevant
-        return filtered.prefix(15).map { tx in
+        // Return top 25 most relevant (increased from 15)
+        return filtered.prefix(25).map { tx in
             "\(tx.date.formatted(date: .numeric, time: .omitted))|\(tx.merchant)|₹\(Int(tx.amount))|\(tx.category)|\(tx.type == .income ? "IN" : "EX")"
         }.joined(separator: "\n")
     }
 }
-

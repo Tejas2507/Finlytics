@@ -178,29 +178,91 @@ class MerchantAnalytics {
     
     // MARK: - Build Rich Context String for AI Chat
     
-    func buildRichContext(transactions: [Transaction], userQuery: String) -> String {
+    func buildRichContext(transactions: [Transaction], userQuery: String, projects: [Project] = []) -> String {
+        let calendar = Calendar.current
+        let now = Date()
+        let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
+        let startOfLastMonth = calendar.date(byAdding: .month, value: -1, to: startOfMonth) ?? now
+        
         let merchantStats = computeMerchantStats(from: transactions)
         let categoryStats = computeCategoryStats(from: transactions)
         let monthlyStats = computeMonthlyStats(from: transactions)
         
         let queryLower = userQuery.lowercased()
         
+        // Date formatter for month name
+        let monthFormatter = DateFormatter()
+        monthFormatter.dateFormat = "MMMM yyyy"
+        let currentMonthName = monthFormatter.string(from: now)
+        let lastMonthName = monthFormatter.string(from: startOfLastMonth)
+        
         var sections: [String] = []
         
-        // --- SECTION 1: Overall Summary ---
+        // --- SECTION 0: Temporal Anchor ---
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "EEEE, d MMMM yyyy"
+        sections.append("TODAY'S DATE: \(dateFormatter.string(from: now))")
+        
+        // --- SECTION 1: THIS MONTH (Most important — always first) ---
+        let thisMonthTx = transactions.filter { $0.date >= startOfMonth }
+        let thisMonthExpenses = thisMonthTx.filter { MonthlyStats.isSpending($0) }
+        let thisMonthIncome = thisMonthTx.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+        let thisMonthSpent = thisMonthExpenses.reduce(0) { $0 + $1.amount }
+        let thisMonthNet = thisMonthIncome - thisMonthSpent
+        
+        // Top category this month
+        let thisMonthByCategory = Dictionary(grouping: thisMonthExpenses) { $0.category }
+        let thisMonthTopCats = thisMonthByCategory.map { ($0.key, $0.value.reduce(0) { $0 + $1.amount }) }
+            .sorted { $0.1 > $1.1 }
+        let thisMonthCatStr = thisMonthTopCats.prefix(5).map { cat in
+            let pct = thisMonthSpent > 0 ? Int(cat.1 / thisMonthSpent * 100) : 0
+            return "  \(cat.0): ₹\(Int(cat.1)) (\(pct)%)"
+        }.joined(separator: "\n")
+        
+        // Top merchant this month
+        let thisMonthByMerchant = Dictionary(grouping: thisMonthExpenses) { $0.merchant }
+        let thisMonthTopMerchants = thisMonthByMerchant.map { ($0.key, $0.value.reduce(0) { $0 + $1.amount }, $0.value.count) }
+            .sorted { $0.1 > $1.1 }
+        let thisMonthMerchantStr = thisMonthTopMerchants.prefix(3).map { m in
+            "  \(m.0): ₹\(Int(m.1)) (\(m.2) visits)"
+        }.joined(separator: "\n")
+        
+        sections.append("""
+        THIS MONTH (\(currentMonthName)):
+        • Income: ₹\(Int(thisMonthIncome))
+        • Expenses: ₹\(Int(thisMonthSpent))
+        • Net: ₹\(Int(thisMonthNet))
+        • Transaction count: \(thisMonthTx.count)
+        Top Categories:\n\(thisMonthCatStr.isEmpty ? "  No expenses yet" : thisMonthCatStr)
+        Top Merchants:\n\(thisMonthMerchantStr.isEmpty ? "  No expenses yet" : thisMonthMerchantStr)
+        """)
+        
+        // --- SECTION 2: Last Month Comparison ---
+        let lastMonthTx = transactions.filter { $0.date >= startOfLastMonth && $0.date < startOfMonth }
+        let lastMonthSpent = lastMonthTx.filter { MonthlyStats.isSpending($0) }.reduce(0) { $0 + $1.amount }
+        let lastMonthIncome = lastMonthTx.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+        let trendPct = lastMonthSpent > 0 ? Int(((thisMonthSpent - lastMonthSpent) / lastMonthSpent) * 100) : 0
+        
+        sections.append("""
+        LAST MONTH (\(lastMonthName)):
+        • Income: ₹\(Int(lastMonthIncome))
+        • Expenses: ₹\(Int(lastMonthSpent))
+        • Change vs current: \(trendPct > 0 ? "+\(trendPct)%" : "\(trendPct)%")
+        """)
+        
+        // --- SECTION 3: All-Time Historical Summary ---
         let totalExpenses = transactions.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
         let totalIncome = transactions.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
         sections.append("""
-        FINANCIAL OVERVIEW:
+        ALL-TIME TOTALS (Lifetime):
         • Total Income: ₹\(Int(totalIncome))
         • Total Expenses: ₹\(Int(totalExpenses))
         • Net Balance: ₹\(Int(totalIncome - totalExpenses))
         """)
         
-        // --- SECTION 2: Targeted Merchant Data (if query mentions a merchant) ---
+        // --- SECTION 4: Targeted Merchant Data (if query mentions a merchant) ---
         let matchedMerchants = merchantStats.filter { stat in
             let nameLower = stat.name.lowercased()
-            // Fuzzy: check if query contains merchant name OR merchant name contains query keywords
             return queryLower.contains(nameLower) || nameLower.split(separator: " ").contains(where: { queryLower.contains($0.lowercased()) })
         }
         
@@ -210,14 +272,13 @@ class MerchantAnalytics {
                 return """
                 📍 \(m.name):
                   Total: ₹\(Int(m.totalSpent)) | \(m.visitCount) visits | Avg/visit: ₹\(Int(m.avgPerVisit))
-                  Avg/month: ₹\(Int(m.avgMonthlySpend)) | Category: \(m.primaryCategory)
-                  Monthly: \(monthlyStr)
+                  Category: \(m.primaryCategory) | Monthly: \(monthlyStr)
                 """
             }.joined(separator: "\n")
             sections.append("TARGETED MERCHANT DATA:\n\(merchantDetail)")
         }
         
-        // --- SECTION 3: Targeted Category Data (if query mentions a category) ---
+        // --- SECTION 5: Targeted Category Data (if query mentions a category) ---
         let matchedCategories = categoryStats.filter { stat in
             queryLower.contains(stat.name.lowercased())
         }
@@ -228,7 +289,7 @@ class MerchantAnalytics {
                 let monthlyStr = c.monthlyBreakdown.map { "\($0.month): ₹\(Int($0.amount))" }.joined(separator: ", ")
                 return """
                 📂 \(c.name):
-                  Total: ₹\(Int(c.totalSpent)) | \(c.transactionCount) txns | Avg/month: ₹\(Int(c.avgMonthly))
+                  All-time: ₹\(Int(c.totalSpent)) | \(c.transactionCount) txns | Avg/month: ₹\(Int(c.avgMonthly))
                   Trend: \(trendStr) vs last month | Top Merchant: \(c.topMerchant)
                   Monthly: \(monthlyStr)
                 """
@@ -236,24 +297,24 @@ class MerchantAnalytics {
             sections.append("TARGETED CATEGORY DATA:\n\(catDetail)")
         }
         
-        // --- SECTION 4: Top Merchants (always provide as context) ---
+        // --- SECTION 6: Top Merchants (all-time, always provide) ---
         let topMerchants = merchantStats.prefix(5).map { m in
             "\(m.name): ₹\(Int(m.totalSpent)) (\(m.visitCount) visits, ₹\(Int(m.avgPerVisit))/visit)"
         }.joined(separator: "\n")
-        sections.append("TOP 5 MERCHANTS:\n\(topMerchants)")
+        sections.append("TOP 5 MERCHANTS (All-Time):\n\(topMerchants)")
         
-        // --- SECTION 5: Top Categories (always provide) ---
+        // --- SECTION 7: Top Categories (all-time, always provide) ---
         let topCategories = categoryStats.prefix(5).map { c in
             let trendStr = c.monthOverMonthTrend > 0 ? "↑\(Int(c.monthOverMonthTrend))%" : (c.monthOverMonthTrend < 0 ? "↓\(Int(abs(c.monthOverMonthTrend)))%" : "→")
             return "\(c.name): ₹\(Int(c.totalSpent)) (avg ₹\(Int(c.avgMonthly))/mo, \(trendStr))"
         }.joined(separator: "\n")
-        sections.append("TOP 5 CATEGORIES:\n\(topCategories)")
+        sections.append("TOP 5 CATEGORIES (All-Time):\n\(topCategories)")
         
-        // --- SECTION 6: Monthly Summary (last 3 months) ---
-        let recentMonths = monthlyStats.prefix(3).map { m in
-            "  \(m.label): Spent ₹\(Int(m.totalSpent)) | Earned ₹\(Int(m.totalIncome)) | Top: \(m.topMerchant) (\(m.topCategory))"
-        }.joined(separator: "\n")
-        sections.append("LAST 3 MONTHS:\n\(recentMonths)")
+        // --- SECTION 8: Projects ---
+        let projectContext = buildProjectContext(transactions: transactions, projects: projects)
+        if !projectContext.isEmpty {
+            sections.append(projectContext)
+        }
         
         return sections.joined(separator: "\n\n")
     }

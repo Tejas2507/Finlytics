@@ -16,8 +16,25 @@ class OpenAIService {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
+        // Split prompt into system instructions and user message for better OpenAI compatibility
+        let systemContent: String
+        let userContent: String
+        
+        // Try to extract the user question from the prompt
+        if let questionRange = systemPrompt.range(of: "## User Question\n") {
+            systemContent = String(systemPrompt[systemPrompt.startIndex..<questionRange.lowerBound])
+            userContent = String(systemPrompt[questionRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if let questionRange = systemPrompt.range(of: "## USER QUESTION:\n") {
+            systemContent = String(systemPrompt[systemPrompt.startIndex..<questionRange.lowerBound])
+            userContent = String(systemPrompt[questionRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            systemContent = systemPrompt
+            userContent = "Please respond to the above."
+        }
+        
         let messages: [[String: Any]] = [
-            ["role": "system", "content": systemPrompt]
+            ["role": "system", "content": systemContent],
+            ["role": "user", "content": userContent]
         ]
         
         let body: [String: Any] = [

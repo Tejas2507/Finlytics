@@ -69,7 +69,7 @@ struct SettingsView: View {
                         Picker("AI Model", selection: $aiModel) {
                             if aiProvider == "gemini" {
                                 Text("Gemini Flash Lite").tag("gemini-flash-lite-latest")
-                                Text("Gemini 2.5 Flash").tag("gemini-2.5-flash")
+                                Text("Gemini Flash Latest").tag("gemini-flash-latest")
                             } else {
                                 Text("GPT 4o Mini").tag("gpt-4o-mini")
                                 Text("GPT 4o").tag("gpt-4o")
@@ -140,7 +140,7 @@ struct SettingsView: View {
                             Text("Finlytics")
                                 .fontWeight(.medium)
                             Spacer()
-                            Text("v1.0")
+                            Text("v1.2.0")
                                 .foregroundColor(.secondary)
                         }
                     }

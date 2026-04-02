@@ -20,6 +20,7 @@ struct Message: Identifiable, Codable {
 struct AIInsightsView: View {
     @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
     @Query private var budgets: [Budget]
+    @Query private var projects: [Project]
     @EnvironmentObject var tutorialManager: TutorialManager
     @AppStorage("monthlySalary") private var monthlySalary: Double = 0.0
     
@@ -130,20 +131,32 @@ struct AIInsightsView: View {
         inputText = ""
         isGenerating = true
         
-        // Append User to Chat Memory Buffer
-        var buffer = UserDefaults.standard.stringArray(forKey: "chatHistoryBuffer") ?? []
-        buffer.append("User: \(text)")
-        UserDefaults.standard.set(buffer, forKey: "chatHistoryBuffer")
+        // Append User to Chat Memory Buffer (only for financial chat, not Help Mode)
+        if !isHelpMode {
+            var buffer = UserDefaults.standard.stringArray(forKey: "chatHistoryBuffer") ?? []
+            buffer.append("User: \(text)")
+            UserDefaults.standard.set(buffer, forKey: "chatHistoryBuffer")
+        }
         
         tutorialManager.completeStep(.aiChat)
         
         Task {
             do {
+                // Build conversation history from last 6 messages for context continuity
+                let recentHistory = messages.suffix(7).dropLast().map { msg in
+                    "\(msg.isUser ? "User" : "AI"): \(msg.text)"
+                }
+                
+                // Filter hidden transactions from AI context
+                let visibleTransactions = transactions.filter { !$0.isHidden }
+                
                 let response = try await AIManager.shared.generateResponse(
                     for: text,
-                    context: transactions,
+                    context: visibleTransactions,
                     budgets: budgets,
                     monthlySalary: monthlySalary,
+                    projects: Array(projects),
+                    conversationHistory: Array(recentHistory),
                     isHelpMode: isHelpMode
                 )
                 
@@ -153,14 +166,16 @@ struct AIInsightsView: View {
                         isGenerating = false
                     }
                     
-                    // Append AI to Chat Memory Buffer
-                    var buffer = UserDefaults.standard.stringArray(forKey: "chatHistoryBuffer") ?? []
-                    buffer.append("AI: \(response)")
-                    UserDefaults.standard.set(buffer, forKey: "chatHistoryBuffer")
-                    
-                    // Trigger summarization if we hit 50 messages (25 interactions) to utilize long context
-                    if buffer.count >= 50 {
-                        AIPersonaEngine.shared.summarizeRecentChats()
+                    // Append to Chat Memory Buffer (only for financial chat, not Help Mode)
+                    if !isHelpMode {
+                        var buffer = UserDefaults.standard.stringArray(forKey: "chatHistoryBuffer") ?? []
+                        buffer.append("AI: \(response)")
+                        UserDefaults.standard.set(buffer, forKey: "chatHistoryBuffer")
+                        
+                        // Trigger summarization if we hit 50 messages (25 interactions)
+                        if buffer.count >= 50 {
+                            AIPersonaEngine.shared.summarizeRecentChats()
+                        }
                     }
                 }
             } catch {

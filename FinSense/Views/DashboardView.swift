@@ -102,9 +102,12 @@ struct DashboardView: View {
                 balanceInput = startingBalance > 0 ? String(format: "%.0f", startingBalance) : ""
             }
             .task {
+                // Filter hidden transactions for AI privacy
+                let visibleTransactions = transactions.filter { !$0.isHidden }
+                
                 // Only fetch once when view appears - InsightEngine handles cooldown internally
                 let key = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
-                let insight = await InsightEngine.shared.fetchTodaysInsight(context: modelContext, transactions: transactions, apiKey: key)
+                let insight = await InsightEngine.shared.fetchTodaysInsight(context: modelContext, transactions: visibleTransactions, apiKey: key)
                 dailyInsight = insight
                 print("DEBUG DASHBOARD: Set dailyInsight to: \(insight?.title ?? "nil")")
                 
@@ -112,7 +115,7 @@ struct DashboardView: View {
                 let now = Date().timeIntervalSince1970
                 if now - lastPersonaUpdate > 7 * 86400 {
                     AIPersonaEngine.shared.archiveCurrentPersona() // snapshot the old one first
-                    await AIPersonaEngine.shared.generatePersona(transactions: transactions)
+                    await AIPersonaEngine.shared.generatePersona(transactions: visibleTransactions)
                     lastPersonaUpdate = now
                 }
                 
@@ -123,8 +126,9 @@ struct DashboardView: View {
             .onReceive(NotificationCenter.default.publisher(for: .chatSignalsUpdated)) { _ in
                 Task {
                     print("🔄 chatSignalsUpdated received — refreshing persona immediately")
+                    let visibleTx = transactions.filter { !$0.isHidden }
                     AIPersonaEngine.shared.archiveCurrentPersona()
-                    await AIPersonaEngine.shared.generatePersona(transactions: transactions)
+                    await AIPersonaEngine.shared.generatePersona(transactions: visibleTx)
                     lastPersonaUpdate = Date().timeIntervalSince1970
                 }
             }

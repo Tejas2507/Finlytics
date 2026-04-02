@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Platform-iOS%2017%2B%20%7C%20macOS%2014%2B-blue?style=for-the-badge&logo=apple" alt="Platform"/>
   <img src="https://img.shields.io/badge/Swift-5.9-orange?style=for-the-badge&logo=swift" alt="Swift"/>
   <img src="https://img.shields.io/badge/SwiftData-Powered-purple?style=for-the-badge" alt="SwiftData"/>
-  <img src="https://img.shields.io/badge/AI-Gemini%202.0%20Flash-4285F4?style=for-the-badge&logo=google" alt="Gemini"/>
+  <img src="https://img.shields.io/badge/AI-Gemini%202.0%20Flash%2FLite-4285F4?style=for-the-badge&logo=google" alt="Gemini"/>
 </p>
 
 <p align="center">
