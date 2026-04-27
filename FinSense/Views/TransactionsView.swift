@@ -11,17 +11,25 @@ struct TransactionsView: View {
     @State private var selectedCategory: String?
     @State private var editingTransaction: Transaction?
     @State private var showingAddSheet = false
+    @State private var showingDatePicker = false
+    
+    // Date Filtering State
+    @State private var selectedDate: Date? = nil
     
     // Bulk Selection State
     @State private var selection = Set<Transaction>()
     @State private var projectTagTransaction: Transaction? = nil
     
     var filteredTransactions: [Transaction] {
-        transactions.filter { tx in
-            let isVisible = !tx.isHidden  // Hidden transactions stay in data, just not shown here
-            let matchesSearch = searchText.isEmpty || tx.merchant.localizedCaseInsensitiveContains(searchText) || tx.category.localizedCaseInsensitiveContains(searchText)
+        let calendar = Calendar.current
+        return transactions.filter { tx in
+            let isVisible = !tx.isHidden
+            let matchesSearch = searchText.isEmpty ||
+                tx.merchant.localizedCaseInsensitiveContains(searchText) ||
+                tx.category.localizedCaseInsensitiveContains(searchText)
             let matchesCategory = selectedCategory == nil || tx.category == selectedCategory
-            return isVisible && matchesSearch && matchesCategory
+            let matchesDate = selectedDate == nil || calendar.isDate(tx.date, inSameDayAs: selectedDate!)
+            return isVisible && matchesSearch && matchesCategory && matchesDate
         }
     }
     
@@ -61,6 +69,33 @@ struct TransactionsView: View {
                     .padding(.horizontal)
                 }
                 .padding(.vertical, 8)
+                
+                // Active Date Filter Chip
+                if let date = selectedDate {
+                    HStack {
+                        Image(systemName: "calendar")
+                            .font(.caption)
+                        Text(date.formatted(date: .abbreviated, time: .omitted))
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Button {
+                            withAnimation { selectedDate = nil }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.indigo.opacity(0.15))
+                    .foregroundColor(.indigo)
+                    .clipShape(Capsule())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.bottom, 4)
+                    .transition(.opacity)
+                }
                 
                 List {
                     ForEach(filteredTransactions) { transaction in
@@ -139,15 +174,28 @@ struct TransactionsView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     if !isSelectionMode {
-                        Button {
-                            showingAddSheet = true
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.title3)
+                        HStack(spacing: 4) {
+                            Button {
+                                showingDatePicker = true
+                            } label: {
+                                Image(systemName: selectedDate != nil ? "calendar.badge.clock" : "calendar")
+                                    .font(.title3)
+                                    .foregroundColor(selectedDate != nil ? .indigo : .blue)
+                            }
+                            
+                            Button {
+                                showingAddSheet = true
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title3)
+                            }
+                            .tutorialTarget(.addTransaction)
                         }
-                        .tutorialTarget(.addTransaction)
                     }
                 }
+            }
+            .sheet(isPresented: $showingDatePicker) {
+                DatePickerSheet(selectedDate: $selectedDate)
             }
             .sheet(isPresented: $showingAddSheet) {
                 NavigationView {
@@ -337,6 +385,59 @@ struct ProjectTagSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Date Picker Sheet
+struct DatePickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selectedDate: Date?
+    @State private var pickerDate: Date = Date()
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 24) {
+                DatePicker(
+                    "Select a Date",
+                    selection: $pickerDate,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .padding(.horizontal)
+                
+                if selectedDate != nil {
+                    Button(role: .destructive) {
+                        selectedDate = nil
+                        dismiss()
+                    } label: {
+                        Label("Clear Date Filter", systemImage: "xmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.horizontal)
+                }
+                
+                Spacer()
+            }
+            .padding(.top)
+            .navigationTitle("Filter by Date")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") {
+                        selectedDate = pickerDate
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+            .onAppear {
+                pickerDate = selectedDate ?? Date()
             }
         }
     }

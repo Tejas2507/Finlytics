@@ -120,18 +120,37 @@ struct ProjectDetailView: View {
             transactionsSection
             
             Section {
-                Button {
-                    withAnimation { project.isHidden = true }
-                    dismiss()
-                } label: {
-                    HStack {
-                        Spacer()
-                        Label("Hide Project from UI", systemImage: "eye.slash")
-                            .foregroundColor(.purple)
-                        Spacer()
+                VStack(spacing: 0) {
+                    Button {
+                        withAnimation { project.isArchived = true }
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label("End Project (Archive)", systemImage: "archivebox.fill")
+                                .foregroundColor(.orange)
+                            Spacer()
+                        }
                     }
+                    .padding(.vertical, 12)
+                    
+                    Divider()
+                    
+                    Button {
+                        withAnimation { project.isHidden = true }
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Label("Hide Project from UI", systemImage: "eye.slash")
+                                .foregroundColor(.purple)
+                            Spacer()
+                        }
+                    }
+                    .padding(.vertical, 12)
                 }
-                .padding(.vertical, 12)
+                .background(Color(.systemGray6))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .listRowInsets(EdgeInsets())
             .listRowSeparator(.hidden)

@@ -140,7 +140,7 @@ struct SettingsView: View {
                             Text("Finlytics")
                                 .fontWeight(.medium)
                             Spacer()
-                            Text("v1.2.0")
+                            Text("v1.2.1")
                                 .foregroundColor(.secondary)
                         }
                     }

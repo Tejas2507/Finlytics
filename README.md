@@ -38,6 +38,7 @@
 ### 📁 Projects & Vaults (New!)
 - **Event-Based Tracking** — Organize transactions into specific Projects like "Wedding", "Summer Trip", or "Home Renovation"
 - **Secure Vault** — Swipe left to "Hide" sensitive projects into a biometric-protected vault
+- **Project Archiving** — Move completed projects (like past trips) to an Archived section to keep your active list clean and prevent them from showing up in transaction tagging
 - **Project Detail Analytics** — Deep-dive searches, category breakdowns, and spending trends specific to each project
 
 ### 🤖 AI Strategy Engine
@@ -55,7 +56,8 @@
 - **Smart Paste (AI-Powered)** — Copy SMS/text and let AI parse the transaction automatically
 - **Merchant Auto-naming** — AI intelligently cleans up merchant names and suggests relevant categories
 - **Precise Timestamps** — Record and edit transactions with granular hour/minute detail
-- **Search & filter** by category, merchant, or date across all tabs
+- **Date-Wise Filtering** — Dedicated calendar picker to filter transactions by exact date with a clean "Apply/Clear" workflow
+- **Search & filter** by category or merchant with integrated real-time results
 
 ### 🔐 Privacy First
 - **100% local storage** using SwiftData
@@ -200,7 +202,8 @@ Finlytics follows these principles:
 - [x] Projects & Vaults functionality
 - [x] Dual-Mode AI (Strategy vs Help)
 - [x] AI-Powered SMS Parsing (Smart Paste)
-- [x] Transaction Time-editing support
+- [x] Project Archiving (End Projects)
+- [x] Date-Wise Filtering UI
 - [ ] Widget support for quick balance view
 - [ ] Recurring transactions
 - [ ] iCloud sync (opt-in)
