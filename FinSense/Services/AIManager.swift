@@ -1,8 +1,6 @@
 import Foundation
 import SwiftData
-import GoogleGenerativeAI // User must add this package
 
-// Placeholder until package is added
 class AIManager {
     static let shared = AIManager()
     
@@ -13,53 +11,6 @@ class AIManager {
         let category: String?
         let type: String? // "Income" or "Expense"
     }
-    
-
-    
-    // MARK: - App Manual (Hidden Context for AI)
-    private var appManual: String {
-        """
-        # Finlytics App Official Manual (User Guide)
-        
-        ## 1. DASHBOARD (Tab 1)
-        - **Balance Card**: Displays your current "Net Savings". Tap it to set your 'Starting Balance'. All transactions are calculated relative to this point.
-        - **Spending Trends**: Charts showing your expense history.
-        - **Projects Summary**: Quick access to your top active projects.
-        - **This Month Sheet**: Accessible via the "This Month" button or by tapping the weekly bars. Contains deeper analytics and historical month navigation.
-        
-        ## 2. TRANSACTIONS (Tab 2)
-        - **Add Transaction (+)**:
-            - *Manual*: Fill in Title, Amount, Category, Date, and **Time**.
-            - *Smart Paste*: Type like you talk. Example: "Spent 50 on coffee" or "Income 10000 salary".
-        - **Editing**: Tap any transaction to change details. You can now edit the **exact time** of a transaction.
-        - **Bulk Actions**: Use 'Select' mode to change categories or 'Hide' multiple items at once.
-        - **Search**: Pull down on the list to filter by merchant or category.
-        
-        ## 3. PROJECTS (The 'Project' Section)
-        - **Purpose**: Group transactions for specific events (e.g., 'Goa Trip', 'Wedding').
-        - **Creation**: Accessible from Dashboard or Transactions. Set an Emoji and a Target Budget.
-        - **Vault (Secure Storage)**: 
-            - Swipe LEFT on any project card in the 'See All' list to find the 'Hide' option.
-            - Hidden projects move to the **Vault** (located in Settings).
-        - **Archiving**: Long-press or use Edit to Archive completed projects.
-        
-        ## 4. SMART BUDGETS (Tab 4)
-        - **Setup**: Create a budget for any category (Food, Travel, etc.).
-        - **Monitoring**: The app shows a progress bar indicating how much of your monthly limit is used.
-        - **AI Suggestion**: Tap the 'Suggest' button to let AI propose realistic limits based on your past spending.
-        
-        ## 5. AI CHATS (Bifurcated Context)
-        - **Financial Strategist (Main Tab)**: Analyzes numbers, spending patterns, and gives advice. Does NOT know app steps.
-        - **App Help Guide (Settings)**: Knows THIS manual and guides you on how to use features. Does NOT see your money data.
-        
-        ## 6. SETTINGS (Tab 5)
-        - **Monthly Income**: Set your salary here for better budgeting.
-        - **Vault**: View your hidden (private) projects and transactions here. Access with device bio/passcode.
-        - **AI Config**: Switch between Gemini/OpenAI models and manage API keys.
-        - **Tutorial**: Tap 'Replay Tutorial' to see the onboarding again.
-        """
-    }
-    
     // MARK: - Valid App Categories (for Smart Paste validation)
     private let validExpenseCategories = [
         "Food & Dining", "Shopping", "Transportation", "Entertainment",
@@ -70,37 +21,37 @@ class AIManager {
         "Salary", "Freelance", "Business", "Investment", "Gift", "Other"
     ]
     
-    // Unified Generation logic with AI Provider routing and optional Persona Injection
+    // Unified generation used by non-chat AI features.
     func generateContent(systemPrompt: String, injectPersona: Bool = true) async throws -> String {
         let aiProvider = UserDefaults.standard.string(forKey: "aiProvider") ?? "gemini"
         
-        var finalPrompt = systemPrompt
-        
-        if injectPersona {
-            let persona = UserDefaults.standard.string(forKey: "userAIPersona") ?? ""
-            if !persona.isEmpty {
-                finalPrompt += """
-                
-                
-                --- HIDDEN BEHAVIORAL DOSSIER (The user does NOT see this) ---
-                The following is a psychological profile of the user, generated from their spending patterns, onboarding answers, and chat history. Use it to deeply personalize your tone, advice, and approach.
-                
-                IMPORTANT RULES FOR USING THIS DOSSIER:
-                • Use it NATURALLY — let it inform your tone and advice, but don't reference it explicitly.
-                • Focus especially on 'Communication Guide' and 'Agent Instructions' for HOW to talk.
-                • Only mention specific dossier insights when directly relevant to the user's question.
-                • NEVER tell the user you have this profile. It should feel like you just "get" them.
-                
-                \(persona)
-                --- END DOSSIER ---
-                """
-            }
-        }
+        // `injectPersona` is retained for source compatibility with existing
+        // structured-output callers. Inferred psychological dossiers are no
+        // longer injected into any prompt.
+        _ = injectPersona
+        let finalPrompt = systemPrompt
         
         if aiProvider == "gemini" {
             let apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
             guard !apiKey.isEmpty else { throw NSError(domain: "AIManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "Gemini API Key missing"]) }
-            return try await generateContentWithFallback(apiKey: apiKey, systemPrompt: finalPrompt)
+            let selectedModel = UserDefaults.standard.string(forKey: "aiModel")
+                ?? GeminiRESTClient.defaultModel
+            let request = AIProviderRequest(
+                systemInstruction: finalPrompt,
+                messages: [
+                    AIProviderMessage(
+                        role: .user,
+                        text: "Follow the system instructions and provide the requested response."
+                    )
+                ],
+                temperature: 0.6,
+                maxOutputTokens: 2_048
+            )
+            return try await GeminiRESTClient.shared.generate(
+                request: request,
+                apiKey: apiKey,
+                model: selectedModel
+            ).text
         } else {
             let apiKey = KeychainHelper.shared.read(for: "openai_api_key") ?? ""
             guard !apiKey.isEmpty else { throw NSError(domain: "AIManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "OpenAI API Key missing"]) }
@@ -108,154 +59,6 @@ class AIManager {
         }
     }
 
-    // Helper to try selected model, then fallback to gemini-flash-latest if it fails
-    private func generateContentWithFallback(apiKey: String, systemPrompt: String) async throws -> String {
-        // Migration: Reset any old/invalid model values to default
-        let validModels = ["gemini-flash-lite-latest", "gemini-flash-latest"]
-        var selectedModel = UserDefaults.standard.string(forKey: "aiModel") ?? "gemini-flash-lite-latest"
-        
-        if !validModels.contains(selectedModel) {
-            selectedModel = "gemini-flash-lite-latest"
-            UserDefaults.standard.set(selectedModel, forKey: "aiModel")
-        }
-        
-        print("DEBUG: Using model \(selectedModel). Key length: \(apiKey.count)")
-        
-        let model = GenerativeModel(name: selectedModel, apiKey: apiKey)
-        
-        do {
-            let response = try await model.generateContent(systemPrompt)
-            return response.text ?? ""
-        } catch {
-            print("DEBUG: Primary model \(selectedModel) failed. Error: \(error.localizedDescription)")
-            
-            // If PRIMARY model fails, fallback to gemini-flash-latest
-            print("DEBUG: Falling back to gemini-flash-latest")
-            let fallbackModel = GenerativeModel(name: "gemini-flash-latest", apiKey: apiKey)
-            do {
-                let fallbackResponse = try await fallbackModel.generateContent(systemPrompt)
-                return fallbackResponse.text ?? ""
-            } catch {
-                 throw NSError(domain: "GeminiService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Primary (\(selectedModel)) & Fallback (Flash) failed. Error: \(error.localizedDescription)"])
-            }
-        }
-    }
-    
-    // MARK: - Chat with Financial Agent
-    // Uses structured analytics + fuzzy keyword matching + conversation memory
-    func generateResponse(for prompt: String, context: [Transaction], budgets: [Budget], monthlySalary: Double, projects: [Project] = [], conversationHistory: [String] = [], isHelpMode: Bool = false) async throws -> String {
-        
-        if isHelpMode {
-            // ── HELP MODE: Strictly App Support ──
-            // NO financial context (transactions, budgets, salary) is included here.
-            // Routes through the unified pipeline (fallback + provider routing)
-            let helpPrompt = """
-            You are Finlytics App Guide — a precise, helpful expert on the Finlytics iOS app.
-            
-            ## MISSION:
-            Assist the user with step-by-step instructions on HOW TO USE the app's features.
-            
-            ## CONTEXT (The App Manual):
-            \(appManual)
-            
-            ## RULES (STRICT):
-            1. Be VERY precise and concise.
-            2. ONLY answer questions about app functionality.
-            3. If the user asks about their financial data (spending, budgets, etc.), politely inform them: "I don't have access to your personal financial data in Help Mode. Please ask your Financial Strategist in the main Chat for spending insights."
-            4. Use bullet points for steps.
-            5. If a feature isn't in the manual, say you're not sure but can guide them through the basics.
-            
-            ## USER QUESTION:
-            \(prompt)
-            """
-            
-            do {
-                // Use unified pipeline but WITHOUT persona injection (Help AI doesn't need personality)
-                return try await generateContent(systemPrompt: helpPrompt, injectPersona: false)
-            } catch {
-                return "Error connecting to AI service. Please check your API key and try again."
-            }
-        }
-        
-        // ── ANALYSIS MODE: Full Financial AI ──
-        // Filter out hidden transactions for privacy
-        let visibleTransactions = context.filter { !$0.isHidden }
-        
-        let richContext = MerchantAnalytics.shared.buildRichContext(
-            transactions: visibleTransactions,
-            userQuery: prompt,
-            projects: projects
-        )
-        
-        let fuzzyTxStr = getRelevantContext(from: visibleTransactions, for: prompt)
-        
-        // ── Budget Context (Current Month) ──
-        let calendar = Calendar.current
-        let now = Date()
-        let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
-        let currentMonthTx = visibleTransactions.filter { $0.date >= startOfMonth }
-        
-        let monthFormatter = DateFormatter()
-        monthFormatter.dateFormat = "MMMM yyyy"
-        let currentMonthName = monthFormatter.string(from: now)
-        
-        let budgetContext = budgets.map { budget in
-            let spent = currentMonthTx.filter { $0.category == budget.category && $0.type == .expense }.reduce(0) { $0 + $1.amount }
-            let pct = budget.monthlyLimit > 0 ? Int((spent / budget.monthlyLimit) * 100) : 0
-            return "\(budget.category): ₹\(Int(spent))/₹\(Int(budget.monthlyLimit)) (\(pct)%)"
-        }.joined(separator: "; ")
-        
-        let salaryContext = monthlySalary > 0 ? "Monthly Salary: ₹\(Int(monthlySalary))" : "Monthly Salary: Not set"
-        
-        // ── Conversation Memory (last messages for continuity) ──
-        let conversationContext: String
-        if !conversationHistory.isEmpty {
-            conversationContext = """
-            ## Recent Conversation (for context continuity)
-            \(conversationHistory.joined(separator: "\n"))
-            """
-        } else {
-            conversationContext = ""
-        }
-        
-        let systemPrompt = """
-        You are Finlytics — a sharp, friendly financial advisor for Indian users. All amounts in ₹ (INR).
-        
-        ## Pre-Computed Analytics (USE THESE NUMBERS — they are accurate and pre-calculated)
-        \(richContext)
-        
-        ## Budget Status (Current Month — \(currentMonthName))
-        \(budgetContext.isEmpty ? "No active budgets set." : budgetContext)
-        \(salaryContext)
-        
-        ## Relevant Transactions (Keyword-matched from history)
-        \(fuzzyTxStr.isEmpty ? "No specific matches found." : fuzzyTxStr)
-        
-        \(conversationContext)
-        
-        ## User Question
-        \(prompt)
-        
-        ## RESPONSE RULES:
-        1. **BE CONCISE** — Answer in 3-5 bullet points. Max 120 words total. No fluff.
-        2. **POINTWISE FORMAT** — Use bullet points (•), not paragraphs. Each bullet = one clear insight.
-        3. **TABLES** — Only use a simple 2-column vertical table (Label | Value) when the user asks for a comparison or breakdown.
-        4. **TONE** — Be a smart, witty financial friend. Not a corporate robot.
-        5. **₹ ALWAYS** — All amounts in ₹ with no decimal places.
-        6. **ADMIT GAPS** — If the data doesn't cover what the user asked, say so honestly.
-        7. **STRICT ISOLATION** — Do NOT provide app instructions here. If the user asks "how to do X", refer them to the Help AI in Settings.
-        8. **TIME AWARENESS** — Pay attention to the date provided. "This month" means the CURRENT month section. "Last month" means the LAST MONTH section. Do NOT mix up all-time totals with monthly data.
-        """
-        
-        do {
-            let text = try await generateContent(systemPrompt: systemPrompt)
-            if text.isEmpty { return "I couldn't generate a response." }
-            return text
-        } catch {
-            return "Error: \(error.localizedDescription)"
-        }
-    }
-    
     // MARK: - Smart Paste: Parse text into transaction details
     func parseTransaction(from text: String) async throws -> ParsedTransaction {
         let allCategories = (validExpenseCategories + validIncomeCategories).joined(separator: ", ")
@@ -401,52 +204,12 @@ class AIManager {
                 .replacingOccurrences(of: "```", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 
-            print("DEBUG: Gemini Budget Response -> \(cleaned)")
             return cleaned
         } catch {
             print("Budget generation failed: \(error)")
             return "[]"
         }
     }
-    
-    // Insight Generation (Legacy)
-    func generateInsight(context: [Transaction], promptTemplate: String) async throws -> String {
-        // Prepare context — filter hidden
-        let visible = context.filter { !$0.isHidden }
-        let recentTx = visible.prefix(50).map {
-            "\($0.date.formatted(date: .numeric, time: .omitted)): \($0.merchant) (\($0.amount))"
-        }.joined(separator: "\n")
-        
-        let fullPrompt = """
-        Analyze these transactions:
-        \(recentTx)
-        
-        Task: \(promptTemplate)
-        
-        Keep the response short, under 40 words. No markdown formatting like bold/italic unless specified.
-        """
-        
-        do {
-            return try await generateContent(systemPrompt: fullPrompt)
-        } catch {
-            return "Could not generate insight."
-        }
-    }
-    
-    // MARK: - TF-IDF Keyword Helpers
-    private func extractKeywords(from text: String) -> [String] {
-        let stopWords: Set<String> = [
-            "a", "an", "the", "and", "but", "or", "for", "nor", "on", "at", "to", "from", "by",
-            "what", "is", "how", "much", "did", "i", "show", "me", "my", "can", "you", "tell",
-            "give", "get", "about", "please", "do", "have", "has", "was", "were", "been",
-            "total", "all", "any", "some", "this", "that", "these", "those"
-        ]
-        let words = text.lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty && !stopWords.contains($0) && $0.count > 1 }
-        return Array(Set(words)) // Unique keywords
-    }
-    
     // MARK: - Smart Insight (Rich Context)
     func generateSmartInsight(context: InsightEngine.FinancialContext) async throws -> String {
         // Pick a random angle to ensure variety
@@ -638,24 +401,5 @@ class AIManager {
         } catch {
             return ""
         }
-    }
-    
-    // MARK: - AI Helpers
-    
-    private func getRelevantContext(from transactions: [Transaction], for prompt: String) -> String {
-        let kw = extractKeywords(from: prompt)
-        if kw.isEmpty { return "No specific keyword matches found." }
-        
-        let filtered = transactions.filter { tx in
-            let text = "\(tx.merchant) \(tx.category) \(tx.notes) \(tx.type)".lowercased()
-            return kw.contains { text.contains($0) }
-        }
-        
-        if filtered.isEmpty { return "No transactions directly matched search keywords." }
-        
-        // Return top 25 most relevant (increased from 15)
-        return filtered.prefix(25).map { tx in
-            "\(tx.date.formatted(date: .numeric, time: .omitted))|\(tx.merchant)|₹\(Int(tx.amount))|\(tx.category)|\(tx.type == .income ? "IN" : "EX")"
-        }.joined(separator: "\n")
     }
 }

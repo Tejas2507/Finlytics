@@ -1,43 +1,34 @@
 import SwiftUI
 import SwiftData
-import GoogleGenerativeAI
-import Combine
-
-struct Message: Identifiable, Codable {
-    let id: UUID
-    let text: String
-    let isUser: Bool
-    let timestamp: Date
-    
-    init(id: UUID = UUID(), text: String, isUser: Bool, timestamp: Date = Date()) {
-        self.id = id
-        self.text = text
-        self.isUser = isUser
-        self.timestamp = timestamp
-    }
-}
 
 struct AIInsightsView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var tutorialManager: TutorialManager
+
     @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
     @Query private var budgets: [Budget]
     @Query private var projects: [Project]
-    @EnvironmentObject var tutorialManager: TutorialManager
-    @AppStorage("monthlySalary") private var monthlySalary: Double = 0.0
-    
-    let isHelpMode: Bool
-    
-    @State private var messages: [Message]
-    @State private var inputText: String = ""
-    @State private var isGenerating: Bool = false
+    @Query private var merchantProfiles: [MerchantProfile]
+
+    @Bindable var thread: ChatThread
+
+    @State private var inputText = ""
+    @State private var generationTask: Task<Void, Never>?
+    @State private var evidenceTransactionIDs: [UUID] = []
+    @State private var showingDeleteConfirmation = false
+    @State private var showingThreadMemory = false
     @FocusState private var isInputFocused: Bool
     
-    init(isHelpMode: Bool = false) {
-        self.isHelpMode = isHelpMode
-        let initialText = isHelpMode ? 
-            "Hello! I'm here to help you get the most out of Finlytics. Ask me anything about how the app works!" :
-            "Hello! I'm your Finlytics assistant. How can I help you manage your finances today?"
-        
-        _messages = State(initialValue: [Message(text: initialText, isUser: false)])
+    private var visibleMessages: [ChatMessage] {
+        thread.messages
+            .filter { $0.status != .superseded }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private var isGenerating: Bool {
+        generationTask != nil ||
+        visibleMessages.contains { $0.status == .pending || $0.status == .streaming }
     }
     
     var body: some View {
@@ -45,321 +36,592 @@ struct AIInsightsView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 14) {
-                        ForEach(messages) { message in
-                            ChatBubble(message: message)
-                                .id(message.id)
+                        if visibleMessages.isEmpty {
+                            emptyState
                         }
-                        
-                        if isGenerating {
-                            TypingIndicator()
-                                .id("typing")
+
+                        ForEach(visibleMessages) { message in
+                            PersistentChatBubble(
+                                message: message,
+                                canRegenerate: canRegenerate(message),
+                                onRetry: { retry(message) },
+                                onRegenerate: { regenerate(message) },
+                                onDelete: { deleteMessage(message) },
+                                onShowEvidence: { result in
+                                    evidenceTransactionIDs = result.evidence.transactionIDs
+                                }
+                            )
+                            .id(message.id)
                         }
                     }
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 10)
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .onChange(of: messages.count) { _, _ in
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        proxy.scrollTo(messages.last?.id, anchor: .bottom)
-                    }
+                .onChange(of: visibleMessages.count) { _, _ in
+                    scrollToBottom(proxy)
                 }
-                .onChange(of: isGenerating) { _, _ in
-                    if isGenerating {
-                        withAnimation(.easeOut(duration: 0.3)) {
-                            proxy.scrollTo("typing", anchor: .bottom)
-                        }
-                    }
+                .onChange(of: visibleMessages.last?.content) { _, _ in
+                    scrollToBottom(proxy, animated: false)
                 }
             }
-            
-            // Input Bar
-            VStack(spacing: 0) {
-                Divider().opacity(0.3)
-                HStack(alignment: .bottom, spacing: 10) {
-                    TextField("Ask anything...", text: $inputText, axis: .vertical)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Color(.systemGray5))
-                        .clipShape(Capsule())
-                        .focused($isInputFocused)
-                        .lineLimit(1...4)
-                    
-                    Button {
-                        sendMessage()
-                    } label: {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 36, height: 36)
-                            .background(
-                                inputText.isEmpty || isGenerating ?
-                                AnyShapeStyle(Color.gray.opacity(0.4)) :
-                                AnyShapeStyle(LinearGradient(colors: [.indigo, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            )
-                            .clipShape(Circle())
-                    }
-                    .disabled(inputText.isEmpty || isGenerating)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .tutorialTarget(.aiChat)
-            }
-            .background(.ultraThinMaterial)
+
+            inputBar
         }
-        .navigationTitle(isHelpMode ? "App Help Guide" : "Financial Strategist")
+        .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    messages = [Message(text: "Chat cleared. How can I help?", isUser: false)]
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        showingThreadMemory = true
+                    } label: {
+                        Label("Thread Memory", systemImage: "brain.head.profile")
+                    }
+                    Button(role: .destructive) {
+                        showingDeleteConfirmation = true
+                    } label: {
+                        Label("Delete Chat", systemImage: "trash")
+                    }
                 } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
-    }
-    
-    private func sendMessage() {
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        
-        let userMsg = Message(text: text, isUser: true)
-        messages.append(userMsg)
-        inputText = ""
-        isGenerating = true
-        
-        // Append User to Chat Memory Buffer (only for financial chat, not Help Mode)
-        if !isHelpMode {
-            var buffer = UserDefaults.standard.stringArray(forKey: "chatHistoryBuffer") ?? []
-            buffer.append("User: \(text)")
-            UserDefaults.standard.set(buffer, forKey: "chatHistoryBuffer")
+        .confirmationDialog(
+            "Delete this chat?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Chat", role: .destructive) {
+                generationTask?.cancel()
+                modelContext.delete(thread)
+                try? modelContext.save()
+                dismiss()
+            }
+        } message: {
+            Text("The thread and all of its messages will be removed from this device.")
         }
-        
+        .sheet(
+            isPresented: Binding(
+                get: { !evidenceTransactionIDs.isEmpty },
+                set: { if !$0 { evidenceTransactionIDs = [] } }
+            )
+        ) {
+            EvidenceTransactionsView(transactionIDs: evidenceTransactionIDs)
+        }
+        .sheet(isPresented: $showingThreadMemory) {
+            ThreadMemoryView(thread: thread)
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 18) {
+            Image(systemName: thread.mode == .financial ? "sparkles" : "questionmark.bubble.fill")
+                .font(.system(size: 42))
+                .foregroundStyle(.indigo)
+
+            VStack(spacing: 6) {
+                Text(thread.mode == .financial ? "Ask about your finances" : "Ask about Finlytics")
+                    .font(.title3.weight(.semibold))
+                Text(
+                    thread.mode == .financial
+                        ? "Totals and comparisons are calculated locally from matched transactions."
+                        : "This chat knows the app manual but never receives your financial data."
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            }
+
+            if thread.mode == .financial {
+                VStack(spacing: 8) {
+                    promptChip("How much did I spend on online food delivery apps this month?")
+                    promptChip("Compare Food & Dining this month with last month")
+                    promptChip("Show my top merchants this month")
+                    promptChip("How close am I to my budgets?")
+                }
+            } else {
+                VStack(spacing: 8) {
+                    promptChip("How do I hide a project in the Vault?")
+                    promptChip("How does Smart Paste work?")
+                    promptChip("How do I create a budget?")
+                }
+            }
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 42)
+    }
+
+    private func promptChip(_ prompt: String) -> some View {
+        Button {
+            sendMessage(prompt)
+        } label: {
+            Text(prompt)
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(Color.indigo.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .disabled(isGenerating)
+    }
+
+    private var inputBar: some View {
+        VStack(spacing: 0) {
+            Divider().opacity(0.35)
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField(
+                    thread.mode == .financial ? "Ask about your transactions…" : "Ask how the app works…",
+                    text: $inputText,
+                    axis: .vertical
+                )
+                .lineLimit(1...5)
+                .focused($isInputFocused)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 18))
+                .disabled(isGenerating)
+
+                Button {
+                    if isGenerating {
+                        cancelGeneration()
+                    } else {
+                        sendMessage(inputText)
+                    }
+                } label: {
+                    Image(systemName: isGenerating ? "stop.fill" : "arrow.up")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(
+                            isGenerating || !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? Color.indigo
+                                : Color.gray.opacity(0.45),
+                            in: Circle()
+                        )
+                }
+                .disabled(!isGenerating && inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .tutorialTarget(.aiChat)
+        }
+        .background(.ultraThinMaterial)
+    }
+
+    private func sendMessage(_ rawText: String) {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isGenerating else { return }
+
+        inputText = ""
+        isInputFocused = false
         tutorialManager.completeStep(.aiChat)
         
-        Task {
-            do {
-                // Build conversation history from last 6 messages for context continuity
-                let recentHistory = messages.suffix(7).dropLast().map { msg in
-                    "\(msg.isUser ? "User" : "AI"): \(msg.text)"
-                }
-                
-                // Filter hidden transactions from AI context
-                let visibleTransactions = transactions.filter { !$0.isHidden }
-                
-                let response = try await AIManager.shared.generateResponse(
-                    for: text,
-                    context: visibleTransactions,
-                    budgets: budgets,
-                    monthlySalary: monthlySalary,
-                    projects: Array(projects),
-                    conversationHistory: Array(recentHistory),
-                    isHelpMode: isHelpMode
-                )
-                
-                await MainActor.run {
-                    withAnimation {
-                        messages.append(Message(text: response, isUser: false))
-                        isGenerating = false
+        let userMessage = ChatMessage(
+            role: .user,
+            content: text,
+            status: .completed
+        )
+        let assistantMessage = ChatMessage(
+            role: .assistant,
+            content: "",
+            status: .pending,
+            replyToMessageID: userMessage.id
+        )
+        modelContext.insert(userMessage)
+        modelContext.insert(assistantMessage)
+        thread.messages.append(userMessage)
+        thread.messages.append(assistantMessage)
+        thread.touch()
+        try? modelContext.save()
+
+        startGeneration(userMessage: userMessage, assistantMessage: assistantMessage)
+    }
+
+    private func startGeneration(
+        userMessage: ChatMessage,
+        assistantMessage: ChatMessage
+    ) {
+        generationTask = Task { @MainActor in
+            await ChatOrchestrator.shared.generateReply(
+                thread: thread,
+                userMessage: userMessage,
+                assistantMessage: assistantMessage,
+                transactions: transactions,
+                budgets: budgets,
+                projects: projects,
+                merchantProfiles: merchantProfiles,
+                modelContext: modelContext
+            )
+            generationTask = nil
+        }
+    }
+
+    private func retry(_ assistantMessage: ChatMessage) {
+        guard !isGenerating,
+              canRegenerate(assistantMessage),
+              let userID = assistantMessage.replyToMessageID,
+              let userMessage = thread.messages.first(where: { $0.id == userID }) else {
+            return
+        }
+
+        assistantMessage.content = ""
+        assistantMessage.status = .pending
+        assistantMessage.errorCode = nil
+        assistantMessage.errorMessage = nil
+        try? modelContext.save()
+        startGeneration(userMessage: userMessage, assistantMessage: assistantMessage)
+    }
+
+    private func regenerate(_ assistantMessage: ChatMessage) {
+        guard !isGenerating,
+              canRegenerate(assistantMessage),
+              assistantMessage.role == .assistant,
+              let userID = assistantMessage.replyToMessageID,
+              let userMessage = thread.messages.first(where: { $0.id == userID }) else {
+            return
+        }
+
+        assistantMessage.status = .superseded
+        let replacement = ChatMessage(
+            role: .assistant,
+            content: "",
+            status: .pending,
+            replyToMessageID: userID,
+            regenerationGroupID: assistantMessage.regenerationGroupID ?? assistantMessage.id
+        )
+        replacement.queryPlan = assistantMessage.queryPlan
+        modelContext.insert(replacement)
+        thread.messages.append(replacement)
+        thread.touch()
+        try? modelContext.save()
+        startGeneration(userMessage: userMessage, assistantMessage: replacement)
+    }
+
+    private func canRegenerate(_ message: ChatMessage) -> Bool {
+        message.role == .assistant &&
+        visibleMessages.last(where: { $0.role == .assistant })?.id == message.id
+    }
+
+    private func cancelGeneration() {
+        generationTask?.cancel()
+        generationTask = nil
+    }
+
+    private func deleteMessage(_ message: ChatMessage) {
+        guard !isGenerating else { return }
+        if message.role == .user {
+            let replies = thread.messages.filter { $0.replyToMessageID == message.id }
+            for reply in replies {
+                modelContext.delete(reply)
+            }
+        }
+        modelContext.delete(message)
+        thread.rollingSummary = ""
+        thread.summaryThroughDate = nil
+        thread.lastQuery = nil
+        thread.touch()
+        try? modelContext.save()
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        guard let lastID = visibleMessages.last?.id else { return }
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(lastID, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(lastID, anchor: .bottom)
+        }
+    }
+}
+
+private struct ThreadMemoryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Bindable var thread: ChatThread
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    if thread.rollingSummary.isEmpty {
+                        Text("No older messages have been summarized yet. Recent messages are used directly within a small context window.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(thread.rollingSummary)
+                            .textSelection(.enabled)
                     }
-                    
-                    // Append to Chat Memory Buffer (only for financial chat, not Help Mode)
-                    if !isHelpMode {
-                        var buffer = UserDefaults.standard.stringArray(forKey: "chatHistoryBuffer") ?? []
-                        buffer.append("AI: \(response)")
-                        UserDefaults.standard.set(buffer, forKey: "chatHistoryBuffer")
-                        
-                        // Trigger summarization if we hit 50 messages (25 interactions)
-                        if buffer.count >= 50 {
-                            AIPersonaEngine.shared.summarizeRecentChats()
+                } header: {
+                    Text("Saved Thread Summary")
+                } footer: {
+                    Text("This summary is stored on this device and contains only explicit conversation facts for continuity. It is never a hidden personality profile.")
+                }
+
+                if !thread.rollingSummary.isEmpty || thread.lastQuery != nil {
+                    Section {
+                        Button("Clear Saved Memory", role: .destructive) {
+                            thread.rollingSummary = ""
+                            thread.summaryThroughDate = thread.messages
+                                .filter { $0.status == .completed }
+                                .map(\.createdAt)
+                                .max()
+                            thread.lastQuery = nil
+                            thread.touch()
+                            try? modelContext.save()
                         }
                     }
                 }
-            } catch {
-                await MainActor.run {
-                    messages.append(Message(text: "Error: \(error.localizedDescription)", isUser: false))
-                    isGenerating = false
+            }
+            .navigationTitle("Thread Memory")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
                 }
             }
         }
     }
 }
 
-struct ChatBubble: View {
-    let message: Message
+private struct PersistentChatBubble: View {
+    @Bindable var message: ChatMessage
+    let canRegenerate: Bool
+    let onRetry: () -> Void
+    let onRegenerate: () -> Void
+    let onDelete: () -> Void
+    let onShowEvidence: (FinanceQueryResult) -> Void
     
     var body: some View {
         HStack(alignment: .bottom) {
-            if message.isUser { Spacer(minLength: 40) }
-            
-            VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
-                FormattedMessageView(content: message.text, isUser: message.isUser)
+            if message.role == .user { Spacer(minLength: 42) }
+
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 7) {
+                if message.status == .pending && message.content.isEmpty {
+                    TypingDots()
+                } else {
+                    ChatMarkdownText(text: message.content)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(
-                        message.isUser ?
-                        AnyShapeStyle(LinearGradient(colors: [.indigo, .purple.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing)) :
-                        AnyShapeStyle(Color(.systemGray5))
-                    )
-                    .foregroundColor(message.isUser ? .white : .primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                
-                Text(message.timestamp.formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary.opacity(0.7))
-                    .padding(.horizontal, 6)
-            }
-            
-            if !message.isUser { Spacer(minLength: 40) }
-        }
-    }
-}
+                            message.role == .user
+                                ? Color.indigo
+                                : Color(.systemGray5),
+                            in: RoundedRectangle(cornerRadius: 18)
+                        )
+                        .foregroundStyle(message.role == .user ? Color.white : Color.primary)
+                }
 
-// Custom View to parse and render Markdown + Tables
-struct FormattedMessageView: View {
-    let content: String
-    let isUser: Bool
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(parseBlocks(from: content), id: \.self) { block in
-                switch block {
-                case .text(let string):
-                    // Use standard AttributedString for markdown rendering. 
-                    // SwiftUI's Text(AttributedString) handles spacing correctly if the source markdown is valid.
-                    Text(try! AttributedString(markdown: string, options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                        .fixedSize(horizontal: false, vertical: true)
-                case .table(let rows):
-                    TableView(rows: rows, isUser: isUser)
-                }
-            }
-        }
-    }
-    
-    enum ContentBlock: Hashable {
-        case text(String)
-        case table([String])
-    }
-    
-    func parseBlocks(from text: String) -> [ContentBlock] {
-        var blocks: [ContentBlock] = []
-        var currentTable: [String] = []
-        var currentText = ""
-        
-        let lines = text.components(separatedBy: .newlines)
-        
-        for line in lines {
-            if line.trimmingCharacters(in: .whitespaces).hasPrefix("|") {
-                // Table row detected
-                if !currentText.isEmpty {
-                    blocks.append(.text(currentText))
-                    currentText = ""
-                }
-                currentTable.append(line)
-            } else {
-                // Normal text detected
-                if !currentTable.isEmpty {
-                    blocks.append(.table(currentTable))
-                    currentTable = []
-                }
-                // Preserve the newline explicitly for text blocks
-                currentText += line + "\n"
-            }
-        }
-        
-        if !currentText.isEmpty { blocks.append(.text(currentText.trimmingCharacters(in: .whitespacesAndNewlines))) }
-        if !currentTable.isEmpty { blocks.append(.table(currentTable)) }
-        
-        return blocks
-    }
-}
-
-struct TableView: View {
-    let rows: [String]
-    let isUser: Bool
-    
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
-                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                    let cells = row.split(separator: "|").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                    
-                    if !cells.isEmpty && !row.contains("---") {
-                        GridRow {
-                            ForEach(cells, id: \.self) { cell in
-                                // Parse markdown in cells too!
-                                Text(try! AttributedString(markdown: cell))
-                                    .font(index == 0 ? .headline : .body) // Header bold
-                                    .padding(8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(
-                                        index == 0 ? Color.indigo.opacity(0.8) : // Header
-                                        (isUser ? Color.white.opacity(0.2) : Color.primary.opacity(0.05)) // Rows
-                                    )
-                                    .foregroundColor(
-                                        index == 0 ? .white : // Header Text
-                                        (isUser ? .white : .primary) // Row Text
-                                    )
-                                    .cornerRadius(8)
-                            }
-                        }
+                if let evidence = message.evidence, message.role == .assistant {
+                    FinanceEvidenceCard(result: evidence) {
+                        onShowEvidence(evidence)
                     }
                 }
-            }
-            .padding(10)
-            .background(isUser ? Color.black.opacity(0.2) : Color.gray.opacity(0.1))
-            .cornerRadius(12)
-        }
-    }
-}
 
-struct TypingIndicator: View {
-    @State private var phase = 0.0
-    
-    var body: some View {
-        HStack {
-            HStack(spacing: 5) {
-                ForEach(0..<3) { index in
-                    Circle()
-                        .fill(Color.indigo.opacity(0.6))
-                        .frame(width: 7, height: 7)
-                        .offset(y: sin(phase + Double(index) * 0.8) * 4)
+                HStack(spacing: 8) {
+                    Text(message.createdAt.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+
+                    if message.status == .streaming {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
+
+                    if (message.status == .failed || message.status == .cancelled) &&
+                        canRegenerate {
+                        Button("Retry", action: onRetry)
+                            .font(.caption.weight(.semibold))
+                    } else if canRegenerate && message.status == .completed {
+                        Button(action: onRegenerate) {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Regenerate response")
+                    }
+                }
+                .padding(.horizontal, 5)
+            }
+
+            if message.role != .user { Spacer(minLength: 42) }
+        }
+        .contextMenu {
+            if canRegenerate && message.status == .completed {
+                Button(action: onRegenerate) {
+                    Label("Regenerate", systemImage: "arrow.clockwise")
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Color(.systemGray5))
-            .clipShape(RoundedRectangle(cornerRadius: 18))
-            .onAppear {
-                withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) {
-                    phase = .pi * 2
-                }
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete Message", systemImage: "trash")
             }
-            Spacer()
         }
     }
 }
 
-struct QuickPrompt: View {
-    let title: String
-    let action: () -> Void
+private struct ChatMarkdownText: View {
+    let text: String
     
     var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.indigo.opacity(0.1))
-                .foregroundColor(.indigo)
-                .cornerRadius(16)
+        if let attributed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            Text(attributed)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(text)
+                        .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
-#Preview {
-    AIInsightsView()
+private struct TypingDots: View {
+    @State private var opacity = 0.35
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<3) { _ in
+                Circle()
+                    .fill(Color.indigo)
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .opacity(opacity)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
+        .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 18))
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                opacity = 1
+            }
+        }
+    }
+}
+
+private struct FinanceEvidenceCard: View {
+    let result: FinanceQueryResult
+    let showTransactions: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Verified locally", systemImage: "checkmark.seal.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+                Spacer()
+                Text(result.evidence.periodLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let amount = result.primaryAmount {
+                Text(formattedValue(amount))
+                    .font(.title3.weight(.bold))
+            }
+
+            if let previous = result.comparisonAmount,
+               let label = result.evidence.comparisonPeriodLabel {
+                Text("\(label): \(formattedValue(previous))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !result.groups.isEmpty {
+                Divider()
+                ForEach(result.groups.prefix(4)) { group in
+                    HStack {
+                        Text(group.label)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(formattedValue(group.amount))
+                            .fontWeight(.medium)
+                    }
+                    .font(.caption)
+                }
+            }
+
+            Button(action: showTransactions) {
+                Label(
+                    "View \(result.evidence.primaryCount) matched \(result.evidence.primaryCount == 1 ? "transaction" : "transactions")",
+                    systemImage: "list.bullet.rectangle"
+                )
+                .font(.caption.weight(.semibold))
+            }
+            .disabled(result.evidence.transactionIDs.isEmpty)
+
+            Text(result.evidence.calculation)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(12)
+        .background(Color.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .frame(maxWidth: 340, alignment: .leading)
+    }
+
+    private func currency(_ amount: Decimal) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.locale = Locale(identifier: "en_IN")
+        formatter.currencyCode = "INR"
+        formatter.currencySymbol = "₹"
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSDecimalNumber(decimal: amount)) ?? "₹0"
+    }
+
+    private func formattedValue(_ amount: Decimal) -> String {
+        guard result.query.metric == .transactionCount else {
+            return currency(amount)
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSDecimalNumber(decimal: amount)) ?? "0"
+    }
+}
+
+private struct EvidenceTransactionsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Query(sort: \Transaction.date, order: .reverse) private var allTransactions: [Transaction]
+
+    let transactionIDs: [UUID]
+
+    private var transactions: [Transaction] {
+        let idSet = Set(transactionIDs)
+        return allTransactions.filter { idSet.contains($0.id) && !$0.isHidden }
+    }
+    
+    var body: some View {
+        NavigationStack {
+            List(transactions) { transaction in
+                HStack(spacing: 12) {
+                    Image(systemName: Category.icon(for: transaction.category))
+                        .foregroundStyle(Category.color(for: transaction.category))
+                        .frame(width: 28)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(transaction.merchant)
+                            .fontWeight(.medium)
+                        Text("\(transaction.category) · \(transaction.date.formatted(date: .abbreviated, time: .omitted))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Text(transaction.amount, format: .currency(code: "INR").precision(.fractionLength(0)))
+                        .fontWeight(.semibold)
+                }
+            }
+            .navigationTitle("Matched Transactions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
 }

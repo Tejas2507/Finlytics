@@ -11,6 +11,7 @@ struct AddTransactionView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query private var allTransactions: [Transaction]
+    @Query private var merchantProfiles: [MerchantProfile]
     
     // Optional transaction for editing
     var existingTransaction: Transaction? = nil
@@ -274,6 +275,12 @@ struct AddTransactionView: View {
     }
     
     private func saveTransaction() {
+        let canonicalMerchantKey = MerchantResolver.shared.resolveOrCreateKey(
+            for: merchant,
+            defaultCategory: selectedCategory,
+            profiles: merchantProfiles,
+            modelContext: modelContext
+        )
         if let tx = existingTransaction {
             // Update existing
             tx.amount = amount
@@ -284,6 +291,7 @@ struct AddTransactionView: View {
             tx.category = selectedCategory
             tx.isHidden = isHidden
             tx.projectNames = Array(selectedProjects)
+            tx.canonicalMerchantKey = canonicalMerchantKey
         } else {
             // Create new
             let transaction = Transaction(
@@ -292,11 +300,14 @@ struct AddTransactionView: View {
                 merchant: merchant,
                 notes: notes,
                 type: selectedType,
-                category: selectedCategory
+                category: selectedCategory,
+                isHidden: isHidden,
+                canonicalMerchantKey: canonicalMerchantKey
             )
             transaction.projectNames = Array(selectedProjects)
             modelContext.insert(transaction)
         }
+        try? modelContext.save()
         dismiss()
     }
     

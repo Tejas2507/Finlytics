@@ -159,10 +159,12 @@ struct SmartBudgetView: View {
     private func generateBudgets() {
         isGenerating = true
         Task {
-            let apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
+            let provider = UserDefaults.standard.string(forKey: "aiProvider") ?? "gemini"
+            let keyAccount = provider == "openai" ? "openai_api_key" : "gemini_api_key"
+            let apiKey = KeychainHelper.shared.read(for: keyAccount) ?? ""
             if apiKey.isEmpty {
                 await MainActor.run {
-                    alertMessage = "Please set your Gemini API Key in Settings first."
+                    alertMessage = "Please set your selected AI provider's API key in Settings first."
                     showAlert = true
                     isGenerating = false
                 }

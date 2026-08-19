@@ -1,15 +1,12 @@
 import SwiftUI
 import SwiftData
-import UniformTypeIdentifiers
 
 struct SettingsView: View {
-    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var tutorialManager: TutorialManager
-    @Query private var transactions: [Transaction]
     
     @AppStorage("monthlySalary") private var monthlySalary: Double = 0.0
     @AppStorage("aiProvider") private var aiProvider: String = "gemini"
-    @AppStorage("aiModel") private var aiModel: String = "gemini-flash-lite-latest"
+    @AppStorage("aiModel") private var aiModel: String = "gemini-3.1-flash-lite"
     
     @State private var geminiApiKey: String = ""
     @State private var openAIApiKey: String = ""
@@ -18,7 +15,7 @@ struct SettingsView: View {
     @State private var showAPIKeyHelp = false
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ScrollViewReader { proxy in
                 Form {
                     // Account & AI Setup
@@ -59,7 +56,7 @@ struct SettingsView: View {
                         .pickerStyle(.segmented)
                         .onChange(of: aiProvider) { newValue in
                             if newValue == "gemini" {
-                                aiModel = "gemini-flash-lite-latest"
+                                aiModel = GeminiRESTClient.defaultModel
                             } else {
                                 aiModel = "gpt-4o-mini"
                             }
@@ -68,8 +65,7 @@ struct SettingsView: View {
                         // AI Config Rows
                         Picker("AI Model", selection: $aiModel) {
                             if aiProvider == "gemini" {
-                                Text("Gemini Flash Lite").tag("gemini-flash-lite-latest")
-                                Text("Gemini Flash Latest").tag("gemini-flash-latest")
+                                Text("Gemini 3.1 Flash Lite").tag("gemini-3.1-flash-lite")
                             } else {
                                 Text("GPT 4o Mini").tag("gpt-4o-mini")
                                 Text("GPT 4o").tag("gpt-4o")
@@ -114,6 +110,26 @@ struct SettingsView: View {
                             Label("Vault", systemImage: "lock.fill")
                                 .foregroundColor(.purple)
                         }
+
+                        NavigationLink {
+                            MerchantProfilesView()
+                        } label: {
+                            Label("Merchant Groups", systemImage: "building.2.crop.circle")
+                        }
+                    }
+
+                    Section("AI & Privacy") {
+                        Label("Your API key stays in Keychain", systemImage: "key.fill")
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("What the AI provider receives")
+                                .font(.subheadline.weight(.medium))
+                            Text("Your question and a compact query schema. For advice, only the locally verified result and recent thread context are sent—not a bulk transaction history or Vault items. Unknown merchant names can be sent once for grouping, older thread messages can be summarized, Smart Paste sends clipboard text when invoked, and optional dashboard/budget AI features send compact aggregate summaries.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("Google may use free-tier prompts and outputs to improve its products. Use a paid API tier if you require different data-use terms.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     
                     Section(header: Text("Help & Support")) {
@@ -124,7 +140,7 @@ struct SettingsView: View {
                         }
                         
                         NavigationLink {
-                             AIInsightsView(isHelpMode: true)
+                            ChatThreadListView(mode: .help)
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Label("Ask AI how to use this app", systemImage: "sparkles")
@@ -149,6 +165,9 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .onAppear {
+                if aiProvider == "gemini" {
+                    aiModel = GeminiRESTClient.normalizedModel(aiModel)
+                }
                 if let gKey = KeychainHelper.shared.read(for: "gemini_api_key") {
                     geminiApiKey = gKey
                 }
@@ -174,4 +193,17 @@ struct SettingsView: View {
 
 #Preview {
     SettingsView()
+        .modelContainer(
+            for: [
+                Transaction.self,
+                Budget.self,
+                Project.self,
+                Insight.self,
+                MerchantProfile.self,
+                ChatThread.self,
+                ChatMessage.self
+            ],
+            inMemory: true
+        )
+        .environmentObject(TutorialManager.shared)
 }

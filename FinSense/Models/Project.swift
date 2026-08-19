@@ -1,8 +1,9 @@
 import Foundation
 import SwiftData
 
+extension FinSenseSchemaV2 {
 @Model
-class Project {
+final class Project {
     var id: UUID
     var name: String
     var emoji: String
@@ -20,3 +21,6 @@ class Project {
         self.isArchived = isArchived
     }
 }
+}
+
+typealias Project = FinSenseSchemaV2.Project

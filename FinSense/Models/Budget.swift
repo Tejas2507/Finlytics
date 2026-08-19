@@ -1,8 +1,9 @@
 import Foundation
 import SwiftData
 
+extension FinSenseSchemaV2 {
 @Model
-class Budget {
+final class Budget {
     @Attribute(.unique) var category: String
     var monthlyLimit: Double
     var createdAt: Date
@@ -13,3 +14,6 @@ class Budget {
         self.createdAt = Date()
     }
 }
+}
+
+typealias Budget = FinSenseSchemaV2.Budget

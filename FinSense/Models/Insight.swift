@@ -8,8 +8,9 @@ enum InsightCategory: String, Codable {
     case savingsTip
 }
 
+extension FinSenseSchemaV2 {
 @Model
-class Insight {
+final class Insight {
     var id: String = UUID().uuidString
     var title: String
     var message: String
@@ -25,3 +26,6 @@ class Insight {
         self.relevanceScore = relevanceScore
     }
 }
+}
+
+typealias Insight = FinSenseSchemaV2.Insight

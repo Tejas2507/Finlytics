@@ -7,10 +7,8 @@ struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var tutorialManager: TutorialManager
     @AppStorage("monthlySalary") private var monthlySalary: Double = 0.0
-    @State private var apiKey: String = ""
     @State private var showThisMonth = false
     @State private var dailyInsight: Insight? = nil  // Direct state instead of @Query
-    @AppStorage("lastPersonaUpdate") private var lastPersonaUpdate: Double = 0.0
     
     // Current month's transactions
     var currentMonthTransactions: [Transaction] {
@@ -98,7 +96,6 @@ struct DashboardView: View {
             .navigationTitle("")
             .navigationBarHidden(true)
             .onAppear {
-                apiKey = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
                 balanceInput = startingBalance > 0 ? String(format: "%.0f", startingBalance) : ""
             }
             .task {
@@ -106,31 +103,12 @@ struct DashboardView: View {
                 let visibleTransactions = transactions.filter { !$0.isHidden }
                 
                 // Only fetch once when view appears - InsightEngine handles cooldown internally
-                let key = KeychainHelper.shared.read(for: "gemini_api_key") ?? ""
+                let provider = UserDefaults.standard.string(forKey: "aiProvider") ?? "gemini"
+                let keyAccount = provider == "openai" ? "openai_api_key" : "gemini_api_key"
+                let key = KeychainHelper.shared.read(for: keyAccount) ?? ""
                 let insight = await InsightEngine.shared.fetchTodaysInsight(context: modelContext, transactions: visibleTransactions, apiKey: key)
                 dailyInsight = insight
                 print("DEBUG DASHBOARD: Set dailyInsight to: \(insight?.title ?? "nil")")
-                
-                // Triggers AI Behavioral Profiling in background once a week
-                let now = Date().timeIntervalSince1970
-                if now - lastPersonaUpdate > 7 * 86400 {
-                    AIPersonaEngine.shared.archiveCurrentPersona() // snapshot the old one first
-                    await AIPersonaEngine.shared.generatePersona(transactions: visibleTransactions)
-                    lastPersonaUpdate = now
-                }
-                
-                // 30-day fallback: summarize chat signals even if user chats infrequently
-                AIPersonaEngine.shared.summarizeIfStale()
-            }
-            // When the chat summarizer fires, immediately sync persona with the fresh signals
-            .onReceive(NotificationCenter.default.publisher(for: .chatSignalsUpdated)) { _ in
-                Task {
-                    print("🔄 chatSignalsUpdated received — refreshing persona immediately")
-                    let visibleTx = transactions.filter { !$0.isHidden }
-                    AIPersonaEngine.shared.archiveCurrentPersona()
-                    await AIPersonaEngine.shared.generatePersona(transactions: visibleTx)
-                    lastPersonaUpdate = Date().timeIntervalSince1970
-                }
             }
             .sheet(isPresented: $showThisMonth) {
                 ThisMonthSheet(transactions: transactions)

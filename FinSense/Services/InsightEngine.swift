@@ -225,7 +225,7 @@ class InsightEngine {
         guard !apiKey.isEmpty else {
             let setupInsight = Insight(
                 title: "Setup",
-                message: "Add your Gemini API Key in Settings to unlock AI-powered insights!",
+                message: "Add your selected AI provider's API key in Settings to unlock AI-powered insights!",
                 category: .savingsTip,
                 relevanceScore: 1.0
             )
@@ -245,7 +245,7 @@ class InsightEngine {
             let message: String
             let category: InsightCategory
             
-            print("DEBUG: Calling Gemini API for \(isPersonalized ? "personalized" : "general") insight...")
+            print("DEBUG: Calling AI provider for \(isPersonalized ? "personalized" : "general") insight...")
             
             if isPersonalized {
                 message = try await AIManager.shared.generateSmartInsight(context: financialContext)

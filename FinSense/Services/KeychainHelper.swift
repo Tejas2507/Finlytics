@@ -7,15 +7,17 @@ class KeychainHelper {
     
     func save(_ data: String, for account: String) {
         let data = Data(data.utf8)
-        let query = [
+        let baseQuery = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
-            kSecAttrAccount: account,
-            kSecValueData: data
+            kSecAttrAccount: account
         ] as [String : Any]
+        let addQuery = baseQuery.merging([
+            kSecValueData: data
+        ] as [String : Any]) { _, new in new }
         
-        SecItemDelete(query as CFDictionary)
-        SecItemAdd(query as CFDictionary, nil)
+        SecItemDelete(baseQuery as CFDictionary)
+        SecItemAdd(addQuery as CFDictionary, nil)
     }
     
     func read(for account: String) -> String? {

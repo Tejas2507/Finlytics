@@ -6,18 +6,30 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		96D190232F0810A900276F76 /* GoogleGenerativeAI in Frameworks */ = {isa = PBXBuildFile; productRef = 96D190222F0810A900276F76 /* GoogleGenerativeAI */; };
-/* End PBXBuildFile section */
+/* Begin PBXContainerItemProxy section */
+		A10000000000000000000007 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 96D18FE72F080F6F00276F76 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 96D18FEE2F080F6F00276F76;
+			remoteInfo = FinSense;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		96D18FEF2F080F6F00276F76 /* FinSense.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FinSense.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000001 /* FinSenseTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FinSenseTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		96D18FF12F080F6F00276F76 /* FinSense */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = FinSense;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000002 /* FinSenseTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FinSenseTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -27,7 +39,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				96D190232F0810A900276F76 /* GoogleGenerativeAI in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -38,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				96D18FF12F080F6F00276F76 /* FinSense */,
+				A10000000000000000000002 /* FinSenseTests */,
 				96D18FF02F080F6F00276F76 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -46,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				96D18FEF2F080F6F00276F76 /* FinSense.app */,
+				A10000000000000000000001 /* FinSenseTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,11 +90,33 @@
 			);
 			name = FinSense;
 			packageProductDependencies = (
-				96D190222F0810A900276F76 /* GoogleGenerativeAI */,
 			);
 			productName = FinSense;
 			productReference = 96D18FEF2F080F6F00276F76 /* FinSense.app */;
 			productType = "com.apple.product-type.application";
+		};
+		A10000000000000000000006 /* FinSenseTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000000B /* Build configuration list for PBXNativeTarget "FinSenseTests" */;
+			buildPhases = (
+				A10000000000000000000005 /* Sources */,
+				A10000000000000000000003 /* Frameworks */,
+				A10000000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A10000000000000000000008 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000002 /* FinSenseTests */,
+			);
+			name = FinSenseTests;
+			packageProductDependencies = (
+			);
+			productName = FinSenseTests;
+			productReference = A10000000000000000000001 /* FinSenseTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -89,6 +131,10 @@
 					96D18FEE2F080F6F00276F76 = {
 						CreatedOnToolsVersion = 26.2;
 					};
+					A10000000000000000000006 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 96D18FEE2F080F6F00276F76;
+					};
 				};
 			};
 			buildConfigurationList = 96D18FEA2F080F6F00276F76 /* Build configuration list for PBXProject "FinSense" */;
@@ -101,7 +147,6 @@
 			mainGroup = 96D18FE62F080F6F00276F76;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				96D190212F0810A900276F76 /* XCRemoteSwiftPackageReference "generative-ai-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 96D18FF02F080F6F00276F76 /* Products */;
@@ -109,12 +154,20 @@
 			projectRoot = "";
 			targets = (
 				96D18FEE2F080F6F00276F76 /* FinSense */,
+				A10000000000000000000006 /* FinSenseTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		96D18FED2F080F6F00276F76 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000004 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -131,7 +184,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A10000000000000000000008 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 96D18FEE2F080F6F00276F76 /* FinSense */;
+			targetProxy = A10000000000000000000007 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		96D18FFA2F080F7000276F76 /* Debug */ = {
@@ -319,6 +387,58 @@
 			};
 			name = Release;
 		};
+		A10000000000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = B6KQ9P7PZD;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tejas.FinSenseTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FinSense.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/FinSense";
+			};
+			name = Debug;
+		};
+		A1000000000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = B6KQ9P7PZD;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tejas.FinSenseTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FinSense.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/FinSense";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -340,26 +460,17 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A1000000000000000000000B /* Build configuration list for PBXNativeTarget "FinSenseTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000009 /* Debug */,
+				A1000000000000000000000A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		96D190212F0810A900276F76 /* XCRemoteSwiftPackageReference "generative-ai-swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/google/generative-ai-swift";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.5.6;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		96D190222F0810A900276F76 /* GoogleGenerativeAI */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 96D190212F0810A900276F76 /* XCRemoteSwiftPackageReference "generative-ai-swift" */;
-			productName = GoogleGenerativeAI;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 96D18FE72F080F6F00276F76 /* Project object */;
 }

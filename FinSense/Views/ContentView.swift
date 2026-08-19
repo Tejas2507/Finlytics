@@ -2,8 +2,10 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
     @StateObject private var tutorialManager = TutorialManager.shared
     @State private var showingAddSheet = false
+    @State private var didBootstrapData = false
     
     var body: some View {
         ZStack {
@@ -20,8 +22,8 @@ struct ContentView: View {
                         Label("Transactions", systemImage: "list.bullet.rectangle")
                     }
                 
-                NavigationView {
-                    AIInsightsView(isHelpMode: false)
+                NavigationStack {
+                    ChatThreadListView(mode: .financial)
                 }
                 .tag(2)
                     .tabItem {
@@ -64,10 +66,27 @@ struct ContentView: View {
         .onPreferenceChange(TutorialTargetKey.self) { rects in
             tutorialManager.spotlightRects = rects
         }
+        .task {
+            guard !didBootstrapData else { return }
+            didBootstrapData = true
+            AppDataBootstrapper.run(modelContext: modelContext)
+        }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Transaction.self, inMemory: true)
+        .modelContainer(
+            for: [
+                Transaction.self,
+                Budget.self,
+                Project.self,
+                Insight.self,
+                MerchantProfile.self,
+                ChatThread.self,
+                ChatMessage.self
+            ],
+            inMemory: true
+        )
+        .environmentObject(TutorialManager.shared)
 }

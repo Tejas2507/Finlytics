@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Platform-iOS%2017%2B%20%7C%20macOS%2014%2B-blue?style=for-the-badge&logo=apple" alt="Platform"/>
   <img src="https://img.shields.io/badge/Swift-5.9-orange?style=for-the-badge&logo=swift" alt="Swift"/>
   <img src="https://img.shields.io/badge/SwiftData-Powered-purple?style=for-the-badge" alt="SwiftData"/>
-  <img src="https://img.shields.io/badge/AI-Gemini%202.0%20Flash%2FLite-4285F4?style=for-the-badge&logo=google" alt="Gemini"/>
+  <img src="https://img.shields.io/badge/AI-Gemini%20Flash--Lite-4285F4?style=for-the-badge&logo=google" alt="Gemini"/>
 </p>
 
 <p align="center">
@@ -42,10 +42,12 @@
 - **Project Detail Analytics** — Deep-dive searches, category breakdowns, and spending trends specific to each project
 
 ### 🤖 AI Strategy Engine
-- **Financial Strategist (Main)** — Ask anything about your performance and spending trends via the main AI Chat
+- **Verified Financial Queries** — Gemini converts questions into a typed query plan while Swift calculates every amount locally
+- **Exact Comparisons** — Ask about categories, merchant groups, projects, budgets, or arbitrary periods with source-backed results
+- **Persistent Threads** — Conversations, retry/regenerate state, compact summaries, and follow-ups survive app restarts
+- **Transparent Evidence** — Every factual answer identifies its period, calculation, and matched transactions
 - **App Expert (Help Mode)** — A dedicated AI in Settings that knows the app manual inside out, providing step-by-step guidance without seeing your financial data
 - **Isolated Context Architecture** — Strategic isolation between your private data and app help to ensure maximum privacy
-- **Markdown & table support** for rich, formatted responses
 
 ### 💰 Smart Budget Management
 - **AI-generated budget suggestions** based on spending patterns
@@ -60,10 +62,13 @@
 - **Search & filter** by category or merchant with integrated real-time results
 
 ### 🔐 Privacy First
-- **100% local storage** using SwiftData
+- **Local records and chat storage** using SwiftData
 - **Keychain-secured** API key storage
 - **Hidden Vault** for private transactions protected by biometrics/passcode
-- **No cloud sync** — Your data never leaves your device
+- **Minimal AI context** — Raw transaction history and Vault items are never bulk-uploaded; exact calculations run on-device
+- **Bring your own key** — Each user consumes their own Gemini free-tier quota, so there is no shared paid service
+
+> AI requests are sent to the selected provider. Gemini free-tier prompts and outputs may be used by Google to improve its products. Finlytics sends the question and query schema, sends only a compact verified result for narrative advice, may classify unknown merchant names once, may summarize older thread messages, sends clipboard text when you invoke Smart Paste, and sends compact aggregates for optional dashboard/budget AI features. Vault items and bulk transaction histories are not sent.
 
 ---
 
@@ -82,9 +87,9 @@
 | **UI Framework** | SwiftUI |
 | **Data Persistence** | SwiftData |
 | **Charts** | Swift Charts |
-| **AI Integration** | Google Generative AI SDK |
+| **AI Integration** | Gemini REST API (BYOK) |
 | **Secure Storage** | Keychain Services |
-| **Architecture** | MVVM-ish (View-centric) |
+| **Architecture** | Local query engine + provider-neutral AI orchestration |
 
 ---
 
@@ -108,18 +113,17 @@
    open FinSense.xcodeproj
    ```
 
-3. **Add the Google Generative AI Package**
-   - In Xcode, go to `File > Add Package Dependencies`
-   - Enter: `https://github.com/google/generative-ai-swift`
-   - Add to your target
-
-4. **Build & Run**
+3. **Build & Run**
    - Select your target device (iPhone/Mac)
    - Press `Cmd + R`
 
-5. **Configure API Key**
+4. **Configure API Key**
    - Go to Settings in the app
    - Enter your Gemini API key from [aistudio.google.com](https://aistudio.google.com)
+
+### Tests
+
+The shared `FinSense` scheme includes the `FinSenseTests` target. In Xcode, press `Cmd + U` to run query-engine, date-range, planner, Gemini transport, context-budget, and SwiftData persistence tests.
 
 ---
 
@@ -132,7 +136,7 @@
 4. **Hide** sensitive projects by swiping left and selecting "Hide" to move them into the Vault.
 
 ### Dual-AI Interaction
-- **Tab 5 (AI Chat)**: Talk to the Financial Strategist about your wealth.
+- **AI Chat tab**: Create persistent threads and ask exact questions about spending, income, categories, merchants, projects, and time-period comparisons.
 - **Settings > App Help**: Ask the App Expert how to use specific features or locate the Vault.
 
 ### Smart Paste (AI-Powered)
@@ -153,21 +157,27 @@ Finlytics/
 │   ├── Project.swift          # (New) Project & Vault model
 │   ├── Category.swift         # Category definitions & colors
 │   ├── Budget.swift           # Budget model
-│   └── Insight.swift          # Daily insight model
+│   ├── Insight.swift          # Daily insight model
+│   ├── MerchantProfile.swift  # Canonical aliases and semantic merchant groups
+│   ├── ChatThread.swift       # Persistent financial/help conversations
+│   └── ChatMessage.swift      # Durable messages, query evidence, and retry state
 ├── Views/
 │   ├── DashboardView.swift    # Main dashboard with auto-scrolling tutorial
 │   ├── ProjectsListView.swift # (New) Grouped projects and Vault access
 │   ├── ProjectDetailView.swift # (New) Detailed project analytics
 │   ├── TransactionsView.swift # Transaction list with full search
 │   ├── AddTransactionView.swift # Transaction editor with Time support
-│   ├── AIInsightsView.swift   # Financial strategist chat
+│   ├── AIInsightsView.swift   # Persistent thread detail and evidence UI
+│   ├── ChatThreadListView.swift # Thread history, rename, and deletion
 │   ├── SmartBudgetView.swift  # Budget management
 │   ├── SettingsView.swift     # App settings & Help Expert access
 │   ├── HiddenTransactionsView.swift # The Secure Vault
 │   └── TutorialOverlay.swift  # Interactive onboarding UI
 ├── Services/
-│   ├── AIManager.swift        # Primary AI logic with Persona & Help modes
-│   ├── AIPersonaEngine.swift  # Financial Analyst behavior engine
+│   ├── AIManager.swift        # Shared AI features such as Smart Paste
+│   ├── AI/                    # Gemini REST transport and provider abstraction
+│   ├── Chat/                  # Orchestration, summaries, and bounded context
+│   ├── FinanceQuery/          # Typed planner, exact query engine, and evidence
 │   ├── MerchantAnalytics.swift# Intelligent merchant naming logic
 │   ├── InsightEngine.swift    # Daily financial insight generation
 │   ├── KeychainHelper.swift   # Secure key storage
@@ -181,7 +191,7 @@ Finlytics/
 
 Finlytics follows these principles:
 
-1. **Local-First** — Your financial data is sensitive. It stays on your device.
+1. **Local-First** — Records and calculations stay on-device; optional AI receives only the minimum disclosed context needed for the request.
 2. **Context Isolation** — Strategic separation of business and support AI to prevent data leaks.
 3. **Delightful UX** — Premium dark-mode aesthetics with intentional animations.
 4. **Smart Automation** — Reducing transaction friction via Smart Paste and Merchant intelligence.
@@ -204,6 +214,7 @@ Finlytics follows these principles:
 - [x] AI-Powered SMS Parsing (Smart Paste)
 - [x] Project Archiving (End Projects)
 - [x] Date-Wise Filtering UI
+- [x] Persistent AI threads with verified local financial queries
 - [ ] Widget support for quick balance view
 - [ ] Recurring transactions
 - [ ] iCloud sync (opt-in)

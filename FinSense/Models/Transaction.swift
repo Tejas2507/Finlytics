@@ -6,8 +6,9 @@ enum TransactionType: String, Codable, CaseIterable {
     case expense = "Expense"
 }
 
+extension FinSenseSchemaV2 {
 @Model
-class Transaction {
+final class Transaction {
     var id: UUID
     var amount: Double
     var date: Date
@@ -17,8 +18,18 @@ class Transaction {
     var category: String
     var isHidden: Bool = false
     var projectNames: [String] = []
+    var canonicalMerchantKey: String?
     
-    init(amount: Double, date: Date = Date(), merchant: String, notes: String = "", type: TransactionType = .expense, category: String = "Uncategorized", isHidden: Bool = false) {
+    init(
+        amount: Double,
+        date: Date = Date(),
+        merchant: String,
+        notes: String = "",
+        type: TransactionType = .expense,
+        category: String = "Uncategorized",
+        isHidden: Bool = false,
+        canonicalMerchantKey: String? = nil
+    ) {
         self.id = UUID()
         self.amount = amount
         self.date = date
@@ -27,6 +38,7 @@ class Transaction {
         self.type = type
         self.category = category
         self.isHidden = isHidden
+        self.canonicalMerchantKey = canonicalMerchantKey
     }
     
     // Smart Parsing Logic
@@ -66,3 +78,6 @@ class Transaction {
         return (amount, merchant, type)
     }
 }
+}
+
+typealias Transaction = FinSenseSchemaV2.Transaction
