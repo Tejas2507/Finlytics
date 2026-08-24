@@ -167,32 +167,39 @@ final class ChatOrchestrator {
         thread.lastQuery = query
 
         let verifiedAnswer = FinanceAnswerFormatter().format(result)
-        guard plan.requiresNarration else {
-            assistantMessage.content = verifiedAnswer
-            assistantMessage.status = .completed
-            return
+
+        if !provider.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let chatContext = ChatContextAssembler().assemble(
+                thread: thread,
+                messages: thread.messages,
+                mode: .financial,
+                additionalInstruction: """
+                The app calculated this authoritative financial evidence:
+                \(verifiedAnswer)
+
+                Instructions for your reply:
+                1. State the verified numbers clearly to answer the user's question directly.
+                2. Provide financial context or commentary on what these numbers mean (e.g. key drivers, percentage changes, or group breakdowns).
+                3. Offer 1-2 warm, actionable financial recommendations or observations based on this evidence.
+                4. Maintain 100% fidelity to the numbers above—do not alter amounts or invent transactions.
+                """
+            )
+            let request = AIProviderRequest(
+                systemInstruction: chatContext.systemInstruction,
+                messages: chatContext.messages,
+                temperature: 0.4,
+                maxOutputTokens: 600
+            )
+            do {
+                try await stream(request: request, into: assistantMessage, provider: provider)
+                return
+            } catch {
+                // Fall back gracefully to verified template on provider error
+            }
         }
 
-        let chatContext = ChatContextAssembler().assemble(
-            thread: thread,
-            messages: thread.messages,
-            mode: .financial,
-            additionalInstruction: """
-            The app calculated this authoritative result:
-            \(verifiedAnswer)
-
-            Answer the latest question in at most 120 words.
-            Preserve every number and period exactly. Do not add unsupported causes
-            or characterize the user's personality. Label suggestions as suggestions.
-            """
-        )
-        let request = AIProviderRequest(
-            systemInstruction: chatContext.systemInstruction,
-            messages: chatContext.messages,
-            temperature: 0.3,
-            maxOutputTokens: 500
-        )
-        try await stream(request: request, into: assistantMessage, provider: provider)
+        assistantMessage.content = verifiedAnswer
+        assistantMessage.status = .completed
     }
 
     private func privacySafeProfiles(

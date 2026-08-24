@@ -11,7 +11,9 @@ struct FinanceDateResolver {
 
     func resolve(_ scope: FinanceDateScope) throws -> ResolvedFinanceDateRange {
         let today = calendar.startOfDay(for: now)
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)
+        guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) else {
+            throw FinanceQueryError.invalidDateRange
+        }
 
         switch scope.preset {
         case .today:
@@ -82,15 +84,24 @@ struct FinanceDateResolver {
     func comparisonRange(
         for comparison: FinanceComparison,
         primary: ResolvedFinanceDateRange,
-        primaryScope: FinanceDateScope? = nil
+        primaryScope: FinanceDateScope? = nil,
+        customComparisonScope: FinanceDateScope? = nil
     ) throws -> ResolvedFinanceDateRange? {
         guard comparison != .none else { return nil }
+        if comparison == .customDateScope, let customComparisonScope {
+            return try resolve(customComparisonScope)
+        }
         guard let primaryStart = primary.start, let primaryEnd = primary.end else {
             return nil
         }
 
         switch comparison {
         case .none:
+            return nil
+        case .customDateScope:
+            if let customComparisonScope {
+                return try resolve(customComparisonScope)
+            }
             return nil
         case .previousPeriod:
             if primaryScope?.preset == .thisWeek,

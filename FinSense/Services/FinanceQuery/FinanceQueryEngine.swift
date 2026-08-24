@@ -53,7 +53,8 @@ final class FinanceQueryEngine {
             : try resolver.comparisonRange(
                 for: query.comparison,
                 primary: primaryRange,
-                primaryScope: query.dateScope
+                primaryScope: query.dateScope,
+                customComparisonScope: query.comparisonDateScope
             )
 
         let primaryTransactions = filteredTransactions(

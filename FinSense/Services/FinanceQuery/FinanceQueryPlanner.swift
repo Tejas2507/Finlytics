@@ -149,12 +149,22 @@ final class FinanceQueryPlanner {
         guard transactionTypes.count == raw.transactionTypes.count else {
             throw FinancePlannerError.invalidPlan("The transaction type was not recognized.")
         }
-
+        
         let customStart = raw.startDate.isEmpty ? nil : raw.startDate
         let customEnd = raw.endDate.isEmpty ? nil : raw.endDate
         if raw.datePreset == .custom && (customStart == nil || customEnd == nil) {
             throw FinancePlannerError.invalidPlan("A custom period needs both start and end dates.")
         }
+
+        let compStart = (raw.comparisonStartDate?.isEmpty ?? true) ? nil : raw.comparisonStartDate
+        let compEnd = (raw.comparisonEndDate?.isEmpty ?? true) ? nil : raw.comparisonEndDate
+        let customCompScope: FinanceDateScope?
+        if let compStart, let compEnd {
+            customCompScope = FinanceDateScope(preset: .custom, startDate: compStart, endDate: compEnd)
+        } else {
+            customCompScope = nil
+        }
+        let effectiveComparison = customCompScope != nil ? FinanceComparison.customDateScope : raw.comparison
 
         let query = FinanceQuery(
             metric: raw.metric,
@@ -163,7 +173,8 @@ final class FinanceQueryPlanner {
                 startDate: customStart,
                 endDate: customEnd
             ),
-            comparison: raw.comparison,
+            comparison: effectiveComparison,
+            comparisonDateScope: customCompScope,
             grouping: raw.grouping,
             filters: FinanceQueryFilters(
                 transactionTypes: transactionTypes,
@@ -200,39 +211,27 @@ final class FinanceQueryPlanner {
         now: Date,
         lastQuery: FinanceQuery?
     ) -> String {
-        let dateFormatter = ISO8601DateFormatter()
-        dateFormatter.formatOptions = [.withFullDate]
-        let lastQueryText: String
-        if let lastQuery,
-           let data = try? JSONEncoder().encode(lastQuery),
-           let json = String(data: data, encoding: .utf8) {
-            lastQueryText = json
-        } else {
-            lastQueryText = "none"
-        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        let todayStr = formatter.string(from: now)
 
         return """
-        You are a query planner for an Indian personal-finance app. Produce only the supplied JSON schema.
-        You never calculate money and never make claims about the user's behavior.
+        You are a financial query planner for Finlytics.
+        Map user natural language to a JSON plan. Today is \(todayStr).
 
-        Today: \(dateFormatter.string(from: now))
-        Currency: INR
-        Valid categories: \(categories.joined(separator: ", "))
-        Valid merchant tags: \(merchantTags.joined(separator: ", "))
-        Valid merchant keys: \(merchantKeys.joined(separator: ", "))
-        Previous validated query for follow-ups: \(lastQueryText)
+        Categories available: \(categories.joined(separator: ", "))
+        Merchant tags available: \(merchantTags.joined(separator: ", "))
+        Known merchant keys: \(merchantKeys.joined(separator: ", "))
 
-        Planning rules:
-        - A factual data question uses action=query.
-        - Advice, explanations, or recommendations use action=generalAdvice and select the smallest useful data query.
-        - Use action=clarify only when a missing detail materially changes the answer.
-        - If the user gives no period, use thisMonth and do not silently use allTime.
+        Rules:
+        - If comparing two explicit custom months or ranges (e.g., June vs April), set comparison=customDateScope and provide comparisonStartDate and comparisonEndDate in yyyy-MM-dd format.
         - For this month versus last month, use sameElapsedDaysPreviousMonth so partial months are fair.
         - “food delivery apps” maps to merchant tag foodDelivery, not the whole Food & Dining category.
         - Never request hidden or vault data; there is intentionally no field for it.
         - Use custom dates only as yyyy-MM-dd inclusive calendar dates.
-        - Set requiresNarration=false for exact totals, counts, simple comparisons, and breakdowns.
-        - Set requiresNarration=true only for advice or interpretation.
         - Keep arrays empty when a filter does not apply and limit between 1 and 25.
         """
     }
@@ -245,6 +244,8 @@ final class FinanceQueryPlanner {
             "startDate": .string(description: "yyyy-MM-dd for custom dates, otherwise an empty string"),
             "endDate": .string(description: "yyyy-MM-dd for custom dates, otherwise an empty string"),
             "comparison": .string(values: FinanceComparison.allCases.map(\.rawValue)),
+            "comparisonStartDate": .string(description: "yyyy-MM-dd for custom comparison dates, otherwise an empty string"),
+            "comparisonEndDate": .string(description: "yyyy-MM-dd for custom comparison dates, otherwise an empty string"),
             "grouping": .string(values: FinanceGrouping.allCases.map(\.rawValue)),
             "transactionTypes": .array(of: .string(values: TransactionType.allCases.map(\.rawValue))),
             "categories": .array(of: .string()),
@@ -274,6 +275,8 @@ private struct RawFinanceQueryPlan: Decodable {
     let startDate: String
     let endDate: String
     let comparison: FinanceComparison
+    let comparisonStartDate: String?
+    let comparisonEndDate: String?
     let grouping: FinanceGrouping
     let transactionTypes: [String]
     let categories: [String]
@@ -675,18 +678,21 @@ private struct LocalFinanceIntentParser {
         profiles: [MerchantProfile]
     ) -> String? {
         let paddedText = " \(text) "
-        profiles
-            .flatMap { profile in
-                ([profile.displayName] + profile.aliases).map {
-                    (key: profile.canonicalKey, alias: MerchantResolver.normalize($0))
-                }
+        struct Candidate {
+            let key: String
+            let alias: String
+        }
+        var candidates: [Candidate] = []
+        for profile in profiles {
+            let names = [profile.displayName] + profile.aliases
+            for name in names {
+                let normalized = MerchantResolver.normalize(name)
+                candidates.append(Candidate(key: profile.canonicalKey, alias: normalized))
             }
-            .filter {
-                $0.alias.count >= 3 &&
-                (text == $0.alias || paddedText.contains(" \($0.alias) "))
-            }
-            .sorted { $0.alias.count > $1.alias.count }
-            .first?
-            .key
+        }
+        let matches = candidates.filter { candidate in
+            candidate.alias.count >= 3 && (text == candidate.alias || paddedText.contains(" \(candidate.alias) "))
+        }
+        return matches.max(by: { $0.alias.count < $1.alias.count })?.key
     }
 }

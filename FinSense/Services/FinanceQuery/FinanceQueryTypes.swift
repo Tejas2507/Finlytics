@@ -54,6 +54,7 @@ enum FinanceComparison: String, Codable, CaseIterable {
     case previousMonth
     case previousYear
     case sameElapsedDaysPreviousMonth
+    case customDateScope
 }
 
 enum FinanceGrouping: String, Codable, CaseIterable {
@@ -95,6 +96,7 @@ struct FinanceQuery: Codable, Equatable {
     var metric: FinanceMetric
     var dateScope: FinanceDateScope
     var comparison: FinanceComparison
+    var comparisonDateScope: FinanceDateScope?
     var grouping: FinanceGrouping
     var filters: FinanceQueryFilters
     var includeInvestments: Bool
@@ -104,6 +106,7 @@ struct FinanceQuery: Codable, Equatable {
         metric: FinanceMetric,
         dateScope: FinanceDateScope = FinanceDateScope(),
         comparison: FinanceComparison = .none,
+        comparisonDateScope: FinanceDateScope? = nil,
         grouping: FinanceGrouping = .none,
         filters: FinanceQueryFilters = FinanceQueryFilters(),
         includeInvestments: Bool = false,
@@ -112,6 +115,7 @@ struct FinanceQuery: Codable, Equatable {
         self.metric = metric
         self.dateScope = dateScope
         self.comparison = comparison
+        self.comparisonDateScope = comparisonDateScope
         self.grouping = grouping
         self.filters = filters
         self.includeInvestments = includeInvestments
