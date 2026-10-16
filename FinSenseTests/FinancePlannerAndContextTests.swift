@@ -41,6 +41,50 @@ final class FinancePlannerAndContextTests: XCTestCase {
         XCTAssertEqual(plan.query?.metric, .totalSpent)
     }
 
+    func testCompareWithLastMonthFollowUpClonesValidatedQueryLocally() async throws {
+        let previousQuery = FinanceQuery(
+            metric: .totalSpent,
+            dateScope: FinanceDateScope(preset: .thisMonth),
+            filters: FinanceQueryFilters(categories: ["Food & Dining"])
+        )
+
+        let plan = try await FinanceQueryPlanner.shared.plan(
+            question: "Compare with last month",
+            lastQuery: previousQuery,
+            merchantProfiles: [],
+            apiKey: "",
+            model: GeminiRESTClient.defaultModel
+        )
+
+        XCTAssertEqual(plan.source, .local)
+        XCTAssertEqual(plan.action, .query)
+        XCTAssertEqual(plan.query?.comparison, .sameElapsedDaysPreviousMonth)
+        XCTAssertEqual(plan.query?.filters.categories, ["Food & Dining"])
+        XCTAssertEqual(plan.query?.dateScope.preset, .thisMonth)
+    }
+
+    func testBreakDownByCategoryFollowUpUsesPreviousQuery() async throws {
+        let previousQuery = FinanceQuery(
+            metric: .totalSpent,
+            dateScope: FinanceDateScope(preset: .thisMonth),
+            filters: FinanceQueryFilters(merchantTags: ["foodDelivery"])
+        )
+
+        let plan = try await FinanceQueryPlanner.shared.plan(
+            question: "Break down by category",
+            lastQuery: previousQuery,
+            merchantProfiles: [],
+            apiKey: "",
+            model: GeminiRESTClient.defaultModel
+        )
+
+        XCTAssertEqual(plan.source, .local)
+        XCTAssertEqual(plan.action, .query)
+        XCTAssertEqual(plan.query?.metric, .categoryBreakdown)
+        XCTAssertEqual(plan.query?.grouping, .category)
+        XCTAssertEqual(plan.query?.filters.merchantTags, ["foodDelivery"])
+    }
+
     func testContextAssemblerKeepsSummaryAndBoundsRecentMessages() {
         let thread = ChatThread(
             rollingSummary: "The user explicitly wants to save for a trip."

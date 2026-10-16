@@ -132,4 +132,51 @@ final class ChatOrchestratorTests: XCTestCase {
         XCTAssertEqual(assistant.evidence?.primaryAmount, Decimal(250))
         XCTAssertEqual(thread.lastQuery?.filters.categories, ["Food & Dining"])
     }
+
+    func testGeneralAdviceConversationalLaneSkipsQueryEngine() async throws {
+        let schema = Schema(versionedSchema: FinSenseSchemaV2.self)
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: schema,
+            migrationPlan: FinSenseMigrationPlan.self,
+            configurations: [configuration]
+        )
+        let context = container.mainContext
+        let thread = ChatThread(mode: .financial)
+        let user = ChatMessage(role: .user, content: "Hey there!")
+        let assistant = ChatMessage(
+            role: .assistant,
+            content: "",
+            status: .pending,
+            replyToMessageID: user.id
+        )
+        assistant.queryPlan = FinanceQueryPlan(
+            action: .generalAdvice,
+            query: nil,
+            clarificationQuestion: nil,
+            requiresNarration: true,
+            confidence: 0.9,
+            source: .gemini
+        )
+        thread.messages.append(user)
+        thread.messages.append(assistant)
+        context.insert(thread)
+        try context.save()
+
+        await ChatOrchestrator.shared.generateReply(
+            thread: thread,
+            userMessage: user,
+            assistantMessage: assistant,
+            transactions: [],
+            budgets: [],
+            projects: [],
+            merchantProfiles: [],
+            modelContext: context
+        )
+
+        XCTAssertEqual(assistant.status, .completed)
+        XCTAssertNil(assistant.evidence)
+        XCTAssertNil(thread.lastQuery)
+        XCTAssertFalse(assistant.content.isEmpty)
+    }
 }

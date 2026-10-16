@@ -40,6 +40,7 @@ final class FinanceQueryPlanner {
     func plan(
         question: String,
         lastQuery: FinanceQuery?,
+        conversationContext: String? = nil,
         merchantProfiles: [MerchantProfile],
         apiKey: String,
         model: String,
@@ -72,7 +73,8 @@ final class FinanceQueryPlanner {
                 merchantTags: availableTags,
                 merchantKeys: merchantKeys,
                 now: now,
-                lastQuery: lastQuery
+                lastQuery: lastQuery,
+                conversationContext: conversationContext
             ),
             messages: [AIProviderMessage(role: .user, text: question)],
             responseSchema: Self.responseSchema,
@@ -209,7 +211,8 @@ final class FinanceQueryPlanner {
         merchantTags: [String],
         merchantKeys: [String],
         now: Date,
-        lastQuery: FinanceQuery?
+        lastQuery: FinanceQuery?,
+        conversationContext: String?
     ) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar.current
@@ -218,22 +221,49 @@ final class FinanceQueryPlanner {
         formatter.dateFormat = "yyyy-MM-dd"
         let todayStr = formatter.string(from: now)
 
-        return """
+        var sections: [String] = []
+        sections.append("""
         You are a financial query planner for Finlytics.
-        Map user natural language to a JSON plan. Today is \(todayStr).
+        Map the user's latest natural language message to a JSON plan. Today is \(todayStr).
 
         Categories available: \(categories.joined(separator: ", "))
         Merchant tags available: \(merchantTags.joined(separator: ", "))
         Known merchant keys: \(merchantKeys.joined(separator: ", "))
+        """)
+
+        if let conversationContext, !conversationContext.isEmpty {
+            sections.append("""
+            Recent conversation for resolving references (most recent last):
+            \(conversationContext)
+            """)
+        }
+
+        if let lastQuery,
+           let data = try? JSONEncoder().encode(lastQuery),
+           let json = String(data: data, encoding: .utf8) {
+            sections.append("""
+            Last validated query (use it to resolve follow-ups):
+            \(json)
+            """)
+        }
+
+        sections.append("""
+        Action selection:
+        - "query": the message is answerable with the available metrics; fill in every query field.
+        - "clarify": it is a computable finance question but essential information is missing or ambiguous; ask ONE short clarificationQuestion and fill the remaining fields with your best guess.
+        - "generalAdvice": greetings, thanks, meta questions, opinions, or advice not tied to a calculation. Leave fields at their defaults; the app will not execute a query.
 
         Rules:
+        - Follow-ups: if the latest message refers to earlier context ("and June?", "what about that?", "break it down", "compare with last month"), resolve it using the recent conversation and the last validated query, changing only what the user actually asked about.
         - If comparing two explicit custom months or ranges (e.g., June vs April), set comparison=customDateScope and provide comparisonStartDate and comparisonEndDate in yyyy-MM-dd format.
         - For this month versus last month, use sameElapsedDaysPreviousMonth so partial months are fair.
         - “food delivery apps” maps to merchant tag foodDelivery, not the whole Food & Dining category.
         - Never request hidden or vault data; there is intentionally no field for it.
         - Use custom dates only as yyyy-MM-dd inclusive calendar dates.
         - Keep arrays empty when a filter does not apply and limit between 1 and 25.
-        """
+        """)
+
+        return sections.joined(separator: "\n\n")
     }
 
     private static let responseSchema = AIJSONSchema.object(
@@ -475,7 +505,69 @@ private struct LocalFinanceIntentParser {
             )
         }
 
+        // Vague follow-ups that only make sense against the previous query.
+        if let lastQuery {
+            if text.contains("compare with last month") ||
+                text.contains("compare to last month") {
+                var updated = lastQuery
+                updated.comparison = comparisonForFollowUp(dateScope: updated.dateScope)
+                return FinanceQueryPlan(
+                    action: .query,
+                    query: updated,
+                    clarificationQuestion: nil,
+                    requiresNarration: false,
+                    confidence: 0.99,
+                    source: .local
+                )
+            }
+
+            if text.contains("break") && text.contains("categor") {
+                var updated = lastQuery
+                updated.grouping = .category
+                if updated.metric == .totalSpent {
+                    updated.metric = .categoryBreakdown
+                }
+                return FinanceQueryPlan(
+                    action: .query,
+                    query: updated,
+                    clarificationQuestion: nil,
+                    requiresNarration: false,
+                    confidence: 0.98,
+                    source: .local
+                )
+            }
+
+            if text.contains("break") && text.contains("merchant") {
+                var updated = lastQuery
+                updated.grouping = .merchant
+                if updated.metric == .totalSpent {
+                    updated.metric = .merchantBreakdown
+                }
+                return FinanceQueryPlan(
+                    action: .query,
+                    query: updated,
+                    clarificationQuestion: nil,
+                    requiresNarration: false,
+                    confidence: 0.98,
+                    source: .local
+                )
+            }
+        }
+
         return nil
+    }
+
+    private func comparisonForFollowUp(dateScope: FinanceDateScope) -> FinanceComparison {
+        switch dateScope.preset {
+        case .thisMonth:
+            return .sameElapsedDaysPreviousMonth
+        case .lastMonth:
+            return .previousMonth
+        case .thisYear, .lastYear:
+            return .previousYear
+        default:
+            return .previousPeriod
+        }
     }
 
     private func followUpDateScope(in text: String) -> FinanceDatePreset? {

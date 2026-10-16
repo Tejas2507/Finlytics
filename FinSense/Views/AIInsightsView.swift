@@ -1,5 +1,11 @@
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
+#if canImport(AppKit) && !targetEnvironment(macCatalyst)
+import AppKit
+#endif
 
 struct AIInsightsView: View {
     @Environment(\.modelContext) private var modelContext
@@ -15,10 +21,14 @@ struct AIInsightsView: View {
 
     @State private var inputText = ""
     @State private var generationTask: Task<Void, Never>?
+    @State private var generationPhase: ChatGenerationPhase?
+    @State private var followBottom = true
     @State private var evidenceTransactionIDs: [UUID] = []
     @State private var showingDeleteConfirmation = false
     @State private var showingThreadMemory = false
     @FocusState private var isInputFocused: Bool
+
+    private static let bottomAnchorID = "chat-bottom-anchor"
     
     private var visibleMessages: [ChatMessage] {
         thread.messages
@@ -33,36 +43,90 @@ struct AIInsightsView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 14) {
-                        if visibleMessages.isEmpty {
-                            emptyState
-                        }
+            GeometryReader { viewport in
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 14) {
+                            if visibleMessages.isEmpty {
+                                emptyState
+                            }
 
-                        ForEach(visibleMessages) { message in
-                            PersistentChatBubble(
-                                message: message,
-                                canRegenerate: canRegenerate(message),
-                                onRetry: { retry(message) },
-                                onRegenerate: { regenerate(message) },
-                                onDelete: { deleteMessage(message) },
-                                onShowEvidence: { result in
-                                    evidenceTransactionIDs = result.evidence.transactionIDs
-                                }
-                            )
-                            .id(message.id)
+                            ForEach(visibleMessages) { message in
+                                PersistentChatBubble(
+                                    message: message,
+                                    phase: generationPhaseFor(message),
+                                    canRegenerate: canRegenerate(message),
+                                    onRetry: { retry(message) },
+                                    onRegenerate: { regenerate(message) },
+                                    onDelete: { deleteMessage(message) },
+                                    onShowEvidence: { result in
+                                        evidenceTransactionIDs = result.evidence.transactionIDs
+                                    }
+                                )
+                                .id(message.id)
+                            }
+
+                            if let followUps = pendingFollowUpSuggestions, !followUps.isEmpty {
+                                FollowUpSuggestionsRow(
+                                    suggestions: followUps,
+                                    isDisabled: isGenerating,
+                                    onSelect: { sendMessage($0) }
+                                )
+                            }
+
+                            Color.clear
+                                .frame(height: 1)
+                                .id(Self.bottomAnchorID)
+                                .background(
+                                    GeometryReader { geometry in
+                                        Color.clear.preference(
+                                            key: ChatScrollBottomPreferenceKey.self,
+                                            value: geometry.frame(in: .named("chat-scroll")).maxY
+                                        )
+                                    }
+                                )
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                    }
+                    .coordinateSpace(name: "chat-scroll")
+                    .defaultScrollAnchor(.bottom)
+                    .scrollDismissesKeyboard(.interactively)
+                    .onPreferenceChange(ChatScrollBottomPreferenceKey.self) { contentBottom in
+                        let distanceFromBottom = contentBottom - viewport.size.height
+                        let nearBottom = distanceFromBottom < 120
+                        if nearBottom != followBottom {
+                            followBottom = nearBottom
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: visibleMessages.count) { _, _ in
-                    scrollToBottom(proxy)
-                }
-                .onChange(of: visibleMessages.last?.content) { _, _ in
-                    scrollToBottom(proxy, animated: false)
+                    .onChange(of: visibleMessages.count) { _, _ in
+                        if followBottom { scrollToBottom(proxy) }
+                    }
+                    .onChange(of: visibleMessages.last?.content) { _, _ in
+                        if followBottom { scrollToBottom(proxy, animated: false) }
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        if !followBottom && !visibleMessages.isEmpty {
+                            Button {
+                                followBottom = true
+                                scrollToBottom(proxy, animated: true)
+                            } label: {
+                                Image(systemName: "arrow.down")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                    .padding(10)
+                                    .background(.ultraThinMaterial, in: Circle())
+                                    .overlay(Circle().stroke(Color.primary.opacity(0.1)))
+                                    .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 12)
+                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                            .accessibilityLabel("Jump to latest message")
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.15), value: followBottom)
                 }
             }
 
@@ -217,6 +281,7 @@ struct AIInsightsView: View {
 
         inputText = ""
         isInputFocused = false
+        followBottom = true
         tutorialManager.completeStep(.aiChat)
         
         let userMessage = ChatMessage(
@@ -244,6 +309,7 @@ struct AIInsightsView: View {
         userMessage: ChatMessage,
         assistantMessage: ChatMessage
     ) {
+        generationPhase = nil
         generationTask = Task { @MainActor in
             await ChatOrchestrator.shared.generateReply(
                 thread: thread,
@@ -253,8 +319,12 @@ struct AIInsightsView: View {
                 budgets: budgets,
                 projects: projects,
                 merchantProfiles: merchantProfiles,
-                modelContext: modelContext
+                modelContext: modelContext,
+                onPhase: { phase in
+                    generationPhase = phase
+                }
             )
+            generationPhase = nil
             generationTask = nil
         }
     }
@@ -327,14 +397,91 @@ struct AIInsightsView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
-        guard let lastID = visibleMessages.last?.id else { return }
         if animated {
             withAnimation(.easeOut(duration: 0.2)) {
-                proxy.scrollTo(lastID, anchor: .bottom)
+                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
             }
         } else {
-            proxy.scrollTo(lastID, anchor: .bottom)
+            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
         }
+    }
+
+    /// Phase label shown only inside the assistant message currently generating.
+    private func generationPhaseFor(_ message: ChatMessage) -> ChatGenerationPhase? {
+        guard message.role == .assistant,
+              message.status == .pending || message.status == .streaming else {
+            return nil
+        }
+        return generationPhase
+    }
+
+    /// Context-aware prompt chips shown after the latest completed answer.
+    private var pendingFollowUpSuggestions: [String]? {
+        guard !isGenerating,
+              let last = visibleMessages.last,
+              last.role == .assistant,
+              last.status == .completed else {
+            return nil
+        }
+        let suggestions = followUpSuggestions(for: last)
+        return suggestions.isEmpty ? nil : suggestions
+    }
+
+    private func followUpSuggestions(for message: ChatMessage) -> [String] {
+        if thread.mode == .help {
+            return [
+                "How does Smart Paste work?",
+                "How do I hide a project in the Vault?",
+                "How do I create a budget?"
+            ]
+        }
+
+        if message.queryPlan?.action == .clarify {
+            return ["This month", "Last month", "All time"]
+        }
+
+        guard let evidence = message.evidence else {
+            return [
+                "How much did I spend this month?",
+                "Show my top merchants this month",
+                "How close am I to my budgets?"
+            ]
+        }
+
+        switch evidence.query.metric {
+        case .totalSpent, .totalIncome, .netCashFlow, .averageTransaction,
+             .transactionCount, .balance:
+            return [
+                "Compare with last month",
+                "Break down by category",
+                "How close am I to my budgets?"
+            ]
+        case .topCategories, .categoryBreakdown:
+            return [
+                "Compare with last month",
+                "Break down by merchant",
+                "Show my top merchants this month"
+            ]
+        case .topMerchants, .merchantBreakdown:
+            return [
+                "Compare with last month",
+                "Break down by category",
+                "How close am I to my budgets?"
+            ]
+        default:
+            return [
+                "Compare with last month",
+                "Show top categories this month",
+                "Show my top merchants this month"
+            ]
+        }
+    }
+}
+
+private struct ChatScrollBottomPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
@@ -388,114 +535,235 @@ private struct ThreadMemoryView: View {
 
 private struct PersistentChatBubble: View {
     @Bindable var message: ChatMessage
+    let phase: ChatGenerationPhase?
     let canRegenerate: Bool
     let onRetry: () -> Void
     let onRegenerate: () -> Void
     let onDelete: () -> Void
     let onShowEvidence: (FinanceQueryResult) -> Void
-    
+
+    private var isAssistant: Bool { message.role == .assistant }
+    private var isGeneratingState: Bool {
+        message.status == .pending || message.status == .streaming
+    }
+
     var body: some View {
         HStack(alignment: .bottom) {
-            if message.role == .user { Spacer(minLength: 42) }
+            if !isAssistant { Spacer(minLength: 42) }
 
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 7) {
-                if message.status == .pending && message.content.isEmpty {
-                    TypingDots()
-                } else {
-                    ChatMarkdownText(text: message.content)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(
-                            message.role == .user
-                                ? Color.indigo
-                                : Color(.systemGray5),
-                            in: RoundedRectangle(cornerRadius: 18)
-                        )
-                        .foregroundStyle(message.role == .user ? Color.white : Color.primary)
-                }
+            VStack(alignment: isAssistant ? .leading : .trailing, spacing: 7) {
+                messageContent
 
-                if let evidence = message.evidence, message.role == .assistant {
+                if let evidence = message.evidence, isAssistant {
                     FinanceEvidenceCard(result: evidence) {
                         onShowEvidence(evidence)
                     }
                 }
 
-                HStack(spacing: 8) {
-                    Text(message.createdAt.formatted(date: .omitted, time: .shortened))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-
-                    if message.status == .streaming {
-                        ProgressView()
-                            .controlSize(.mini)
-                    }
-
-                    if (message.status == .failed || message.status == .cancelled) &&
-                        canRegenerate {
-                        Button("Retry", action: onRetry)
-                            .font(.caption.weight(.semibold))
-                    } else if canRegenerate && message.status == .completed {
-                        Button(action: onRegenerate) {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel("Regenerate response")
-                    }
-                }
-                .padding(.horizontal, 5)
+                footer
             }
 
-            if message.role != .user { Spacer(minLength: 42) }
+            if isAssistant { Spacer(minLength: 42) }
         }
-        .contextMenu {
-            if canRegenerate && message.status == .completed {
-                Button(action: onRegenerate) {
-                    Label("Regenerate", systemImage: "arrow.clockwise")
-                }
-            }
-            Button(role: .destructive, action: onDelete) {
-                Label("Delete Message", systemImage: "trash")
-            }
-        }
+        .contextMenu { contextMenu }
     }
-}
 
-private struct ChatMarkdownText: View {
-    let text: String
-    
-    var body: some View {
-        if let attributed = try? AttributedString(
-            markdown: text,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            Text(attributed)
-                .fixedSize(horizontal: false, vertical: true)
+    @ViewBuilder
+    private var messageContent: some View {
+        if isAssistant && message.status == .failed {
+            FailedMessageCard(
+                message: message.errorMessage ?? message.content,
+                errorCode: message.errorCode,
+                canRetry: canRegenerate,
+                onRetry: onRetry
+            )
+        } else if isGeneratingState && message.content.isEmpty {
+            GenerationIndicator(phase: phase)
         } else {
-            Text(text)
-                        .fixedSize(horizontal: false, vertical: true)
+            ChatMarkdownView(text: message.content)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    isAssistant ? Color(.systemGray5) : Color.indigo,
+                    in: RoundedRectangle(cornerRadius: 18)
+                )
+                .foregroundStyle(isAssistant ? Color.primary : Color.white)
         }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 10) {
+            Text(message.createdAt.formatted(date: .omitted, time: .shortened))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            if message.status == .streaming {
+                ProgressView()
+                    .controlSize(.mini)
+            }
+
+            if message.status == .cancelled {
+                Text("Stopped")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            if isAssistant {
+                if canRegenerate && message.status == .cancelled {
+                    Button("Retry", action: onRetry)
+                        .font(.caption.weight(.semibold))
+                } else if canRegenerate && message.status == .completed {
+                    Button(action: copyMessage) {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .accessibilityLabel("Copy response")
+
+                    Button(action: onRegenerate) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .accessibilityLabel("Regenerate response")
+                }
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 5)
+    }
+
+    @ViewBuilder
+    private var contextMenu: some View {
+        Button(action: copyMessage) {
+            Label("Copy", systemImage: "doc.on.doc")
+        }
+
+        if isAssistant, let evidence = message.evidence {
+            Button {
+                onShowEvidence(evidence)
+            } label: {
+                Label("View Evidence", systemImage: "checkmark.seal")
+            }
+        }
+
+        if isAssistant && canRegenerate && message.status == .completed {
+            Button(action: onRegenerate) {
+                Label("Regenerate", systemImage: "arrow.clockwise")
+            }
+        }
+
+        Button(role: .destructive, action: onDelete) {
+            Label("Delete Message", systemImage: "trash")
+        }
+    }
+
+    private func copyMessage() {
+        guard !message.content.isEmpty else { return }
+        #if os(iOS)
+        UIPasteboard.general.string = message.content
+        #elseif os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(message.content, forType: .string)
+        #endif
     }
 }
 
-private struct TypingDots: View {
-    @State private var opacity = 0.35
+private struct FailedMessageCard: View {
+    let message: String
+    let errorCode: String?
+    let canRetry: Bool
+    let onRetry: () -> Void
 
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<3) { _ in
-                Circle()
-                    .fill(Color.indigo)
-                    .frame(width: 6, height: 6)
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Something went wrong", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+
+            Text(message)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if errorCode == "missing_api_key" || errorCode == "authentication" {
+                Text("Add a valid API key in Settings → AI Configuration.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if canRetry {
+                Button(action: onRetry) {
+                    Label("Try Again", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.indigo)
             }
         }
-        .opacity(opacity)
+        .padding(12)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        .frame(maxWidth: 340, alignment: .leading)
+        .textSelection(.enabled)
+    }
+}
+
+private struct FollowUpSuggestionsRow: View {
+    let suggestions: [String]
+    let isDisabled: Bool
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(suggestions, id: \.self) { suggestion in
+                    Button {
+                        onSelect(suggestion)
+                    } label: {
+                        Text(suggestion)
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.indigo)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.indigo.opacity(0.12), in: Capsule())
+                            .overlay(Capsule().stroke(Color.indigo.opacity(0.25), lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDisabled)
+                }
+            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct GenerationIndicator: View {
+    let phase: ChatGenerationPhase?
+    @State private var dotsOpacity = 0.35
+
+    var body: some View {
+        HStack(spacing: 9) {
+            HStack(spacing: 5) {
+                ForEach(0..<3) { _ in
+                    Circle()
+                        .fill(Color.indigo)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .opacity(dotsOpacity)
+
+            if let phase {
+                Text(phase.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .transition(.opacity)
+            }
+        }
         .padding(.horizontal, 14)
         .padding(.vertical, 13)
         .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 18))
+        .animation(.easeInOut(duration: 0.25), value: phase?.rawValue)
         .onAppear {
             withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
-                opacity = 1
+                dotsOpacity = 1
             }
         }
     }

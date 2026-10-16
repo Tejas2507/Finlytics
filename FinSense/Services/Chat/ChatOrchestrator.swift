@@ -1,6 +1,25 @@
 import Foundation
 import SwiftData
 
+/// Human-readable stages reported while an assistant reply is being produced.
+/// The chat UI uses these to explain what is happening during slower steps.
+enum ChatGenerationPhase: String {
+    case understanding
+    case calculating
+    case writing
+
+    var label: String {
+        switch self {
+        case .understanding:
+            return "Understanding your question…"
+        case .calculating:
+            return "Checking your transactions…"
+        case .writing:
+            return "Writing…"
+        }
+    }
+}
+
 @MainActor
 final class ChatOrchestrator {
     static let shared = ChatOrchestrator()
@@ -15,7 +34,8 @@ final class ChatOrchestrator {
         budgets: [Budget],
         projects: [Project],
         merchantProfiles: [MerchantProfile],
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        onPhase: ((ChatGenerationPhase) -> Void)? = nil
     ) async {
         let provider = activeProvider()
         userMessage.status = .completed
@@ -44,9 +64,11 @@ final class ChatOrchestrator {
                     projects: projects,
                     merchantProfiles: merchantProfiles,
                     provider: provider,
-                    modelContext: modelContext
+                    modelContext: modelContext,
+                    onPhase: onPhase
                 )
             case .help:
+                onPhase?(.writing)
                 try await generateHelpReply(
                     thread: thread,
                     assistantMessage: assistantMessage,
@@ -101,7 +123,8 @@ final class ChatOrchestrator {
         projects: [Project],
         merchantProfiles: [MerchantProfile],
         provider: ActiveAIProvider,
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        onPhase: ((ChatGenerationPhase) -> Void)?
     ) async throws {
         let visibleProfiles = privacySafeProfiles(
             transactions: transactions,
@@ -111,9 +134,14 @@ final class ChatOrchestrator {
         if let storedPlan = assistantMessage.queryPlan {
             plan = storedPlan
         } else {
+            onPhase?(.understanding)
             plan = try await FinanceQueryPlanner.shared.plan(
                 question: userMessage.content,
                 lastQuery: thread.lastQuery,
+                conversationContext: plannerConversationContext(
+                    thread: thread,
+                    userMessage: userMessage
+                ),
                 merchantProfiles: visibleProfiles,
                 apiKey: provider.apiKey,
                 model: provider.model,
@@ -126,6 +154,16 @@ final class ChatOrchestrator {
             assistantMessage.content = plan.clarificationQuestion
                 ?? "Which category or time period should I use?"
             assistantMessage.status = .completed
+            return
+        }
+
+        if plan.action == .generalAdvice {
+            try await generateConversationalReply(
+                thread: thread,
+                assistantMessage: assistantMessage,
+                provider: provider,
+                onPhase: onPhase
+            )
             return
         }
 
@@ -162,6 +200,7 @@ final class ChatOrchestrator {
                 : nil,
             allowHiddenTransactions: false
         )
+        onPhase?(.calculating)
         let result = try FinanceQueryEngine.shared.execute(query, context: queryContext)
         assistantMessage.evidence = result
         thread.lastQuery = query
@@ -173,16 +212,7 @@ final class ChatOrchestrator {
                 thread: thread,
                 messages: thread.messages,
                 mode: .financial,
-                additionalInstruction: """
-                The app calculated this authoritative financial evidence:
-                \(verifiedAnswer)
-
-                Instructions for your reply:
-                1. State the verified numbers clearly to answer the user's question directly.
-                2. Provide financial context or commentary on what these numbers mean (e.g. key drivers, percentage changes, or group breakdowns).
-                3. Offer 1-2 warm, actionable financial recommendations or observations based on this evidence.
-                4. Maintain 100% fidelity to the numbers above—do not alter amounts or invent transactions.
-                """
+                additionalInstruction: narrationInstruction(verifiedAnswer: verifiedAnswer)
             )
             let request = AIProviderRequest(
                 systemInstruction: chatContext.systemInstruction,
@@ -190,6 +220,7 @@ final class ChatOrchestrator {
                 temperature: 0.4,
                 maxOutputTokens: 600
             )
+            onPhase?(.writing)
             do {
                 try await stream(request: request, into: assistantMessage, provider: provider)
                 return
@@ -200,6 +231,95 @@ final class ChatOrchestrator {
 
         assistantMessage.content = verifiedAnswer
         assistantMessage.status = .completed
+    }
+
+    /// Conversational lane for messages the planner marks as general advice:
+    /// greetings, meta questions, or open-ended asks without a computable query.
+    /// The AI may chat freely but never receives or invents financial figures.
+    private func generateConversationalReply(
+        thread: ChatThread,
+        assistantMessage: ChatMessage,
+        provider: ActiveAIProvider,
+        onPhase: ((ChatGenerationPhase) -> Void)?
+    ) async throws {
+        guard !provider.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            assistantMessage.status = .completed
+            assistantMessage.content = """
+            Add your AI API key in Settings → AI Configuration to chat freely here.
+
+            In the meantime, I can still answer questions like “How much did I spend this month?”, “Show my top merchants”, or “Compare Food & Dining with last month”.
+            """
+            return
+        }
+
+        let chatContext = ChatContextAssembler().assemble(
+            thread: thread,
+            messages: thread.messages,
+            mode: .financial,
+            additionalInstruction: """
+            The user's latest message is conversational, not a computable finance question.
+            Reply in 2-4 warm, natural sentences. Never invent or guess financial figures; you have no verified evidence for this message.
+            If the user seems to expect numbers, briefly say what this screen can compute (spending, income, comparisons, category/merchant breakdowns, budgets, projects, and balance) and suggest one concrete question they could ask.
+            Keep the response short: no headings, no tables. Use '-' bullets only if listing more than two items.
+            """
+        )
+        let request = AIProviderRequest(
+            systemInstruction: chatContext.systemInstruction,
+            messages: chatContext.messages,
+            temperature: 0.5,
+            maxOutputTokens: 400
+        )
+        onPhase?(.writing)
+        try await stream(request: request, into: assistantMessage, provider: provider)
+    }
+
+    private func narrationInstruction(verifiedAnswer: String) -> String {
+        """
+        The app calculated this authoritative financial evidence:
+        \(verifiedAnswer)
+
+        Instructions for your reply:
+        1. State the verified numbers clearly to answer the user's question directly.
+        2. Provide financial context or commentary on what these numbers mean (e.g. key drivers, percentage changes, or group breakdowns).
+        3. Offer 1-2 warm, actionable financial recommendations or observations based on this evidence.
+        4. Maintain 100% fidelity to the numbers above—do not alter amounts or invent transactions.
+        5. Format for a chat bubble: short paragraphs, **bold** for key figures, and '-' bullets when listing more than two items. Do not use headings or tables.
+        """
+    }
+
+    /// Compact transcript of the last few turns used only to resolve follow-ups
+    /// and clarification answers during query planning.
+    private func plannerConversationContext(
+        thread: ChatThread,
+        userMessage: ChatMessage
+    ) -> String? {
+        let previous = thread.messages
+            .filter {
+                $0.id != userMessage.id &&
+                $0.role != .system &&
+                $0.status != .superseded &&
+                !$0.content.isEmpty
+            }
+            .sorted { $0.createdAt < $1.createdAt }
+            .suffix(4)
+        guard !previous.isEmpty else { return nil }
+
+        var lines = previous.map { message -> String in
+            let role = message.role == .user ? "User" : "Assistant"
+            let compact = message.content
+                .replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespaces)
+            let trimmed = compact.count > 240
+                ? String(compact.prefix(240)) + "…"
+                : compact
+            return "\(role): \(trimmed)"
+        }
+        if let last = previous.last,
+           last.role == .assistant,
+           last.queryPlan?.action == .clarify {
+            lines.append("(The Assistant's last message was a clarification question — the latest User message answers it.)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func privacySafeProfiles(

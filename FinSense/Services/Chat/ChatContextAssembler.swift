@@ -109,6 +109,7 @@ struct ChatContextAssembler {
             You are the Finlytics app help guide.
             Give short, precise steps about app usage only.
             You have no access to the user's financial records.
+            Prefer plain sentences; when giving steps, use '-' bullets. Keep replies brief and scannable.
             """)
         }
 
